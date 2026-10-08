@@ -39,6 +39,8 @@ namespace QuanLyHeThong
                 new JunkLocation { Label = "Cache Internet (INetCache)", Path = Path.Combine(local, @"Microsoft\Windows\INetCache"), DefaultChecked = true },
                 new JunkLocation { Label = "Báo lỗi treo (CrashDumps)", Path = Path.Combine(local, "CrashDumps"), DefaultChecked = true },
                 new JunkLocation { Label = "File gần đây (Recent)", Path = Path.Combine(appdata, @"Microsoft\Windows\Recent"), DefaultChecked = false },
+                new JunkLocation { Label = "Lịch sử Start Menu / Jump List (Automatic)", Path = Path.Combine(appdata, @"Microsoft\Windows\Recent\AutomaticDestinations"), DefaultChecked = true },
+                new JunkLocation { Label = "Lịch sử Start Menu / Jump List (Custom)", Path = Path.Combine(appdata, @"Microsoft\Windows\Recent\CustomDestinations"), DefaultChecked = true },
                 new JunkLocation { Label = "Prefetch hệ thống", Path = Path.Combine(win, "Prefetch"), DefaultChecked = false },
                 new JunkLocation { Label = "Cache Windows Update (Download)", Path = Path.Combine(win, @"SoftwareDistribution\Download"), DefaultChecked = false },
                 new JunkLocation { Label = "Báo lỗi Windows (WER ReportQueue)", Path = Path.Combine(Env("ProgramData"), @"Microsoft\Windows\WER\ReportQueue"), DefaultChecked = false },

@@ -64,7 +64,7 @@ namespace QuanLyHeThong
         // ============================================================
         private TabPage BuildTabDevices()
         {
-            var tab = new TabPage("1. Thiết bị / Driver / Card mạng");
+            var tab = new TabPage("1. USB & Wi-Fi");
 
             var top = new Panel { Dock = DockStyle.Top, Height = 44, Padding = new Padding(8) };
             btnScanDev = new Button { Text = "Quét phát hiện", Left = 8, Top = 8, Width = 150, Height = 30 };
@@ -85,8 +85,8 @@ namespace QuanLyHeThong
             lvDevices.Columns.Add("Chi tiết", 300);
             lvDevices.Columns.Add("Trạng thái", 90);
             lvDevices.Groups.Add(new ListViewGroup("usb", "USB cắm ngoài"));
-            lvDevices.Groups.Add(new ListViewGroup("driver", "Gói Driver (bên thứ ba, gồm driver Wi-Fi)"));
-            lvDevices.Groups.Add(new ListViewGroup("nic", "Card mạng (gồm card Wi-Fi)"));
+            lvDevices.Groups.Add(new ListViewGroup("driver", "Driver Wi-Fi"));
+            lvDevices.Groups.Add(new ListViewGroup("nic", "Card Wi-Fi"));
 
             var mid = new Panel { Dock = DockStyle.Top, Height = 44, Padding = new Padding(8, 6, 8, 6) };
             chkCleanReg = new CheckBox { Text = "Xoá cả trong Registry", Checked = true, AutoSize = true, Location = new Point(8, 12) };
@@ -112,7 +112,7 @@ namespace QuanLyHeThong
         private async Task ScanDevices()
         {
             SetBusy(true, btnScanDev, btnDeleteDev, btnClearUsbHist);
-            Log(txtLog1, "Bắt đầu quét thiết bị, driver, card mạng (kể cả Wi-Fi)...");
+            Log(txtLog1, "Bắt đầu quét: USB cắm ngoài, card Wi-Fi, driver Wi-Fi...");
             lvDevices.Items.Clear();
             try
             {

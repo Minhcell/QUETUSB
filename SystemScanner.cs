@@ -77,11 +77,12 @@ namespace QuanLyHeThong
                         string prov = (o["DriverProviderName"] as string) ?? "";
                         string ver = (o["DriverVersion"] as string) ?? "";
                         string cls = (o["DeviceClass"] as string) ?? "";
-                        string wifiTag = IsWifi(dev + " " + prov + " " + cls) ? "(Wi-Fi) " : "";
+                        // Chỉ lấy driver Wi-Fi (không dây), bỏ qua driver khác
+                        if (!IsWifi(dev + " " + prov + " " + cls)) continue;
                         list.Add(new SysItem
                         {
                             Kind = ItemKind.Driver,
-                            Name = wifiTag + inf + "  —  " + (string.IsNullOrEmpty(dev) ? cls : dev),
+                            Name = "(Wi-Fi) " + inf + "  —  " + (string.IsNullOrEmpty(dev) ? cls : dev),
                             Detail = (string.IsNullOrEmpty(prov) ? "" : "NSX: " + prov) +
                                      (string.IsNullOrEmpty(ver) ? "" : "  |  v" + ver),
                             Status = "",
@@ -110,11 +111,12 @@ namespace QuanLyHeThong
                         string conn = (o["NetConnectionID"] as string) ?? "";
                         string mac = (o["MACAddress"] as string) ?? "";
                         bool enabled = o["NetEnabled"] is bool && (bool)o["NetEnabled"];
-                        string wifiTag = IsWifi(name + " " + conn) ? "(Wi-Fi) " : "";
+                        // Chỉ lấy card Wi-Fi (không dây), bỏ qua card mạng thường (LAN)
+                        if (!IsWifi(name + " " + conn)) continue;
                         list.Add(new SysItem
                         {
                             Kind = ItemKind.Nic,
-                            Name = wifiTag + name,
+                            Name = "(Wi-Fi) " + name,
                             Detail = (string.IsNullOrEmpty(conn) ? "" : "Kết nối: " + conn + "  |  ") + "MAC: " + mac,
                             Status = enabled ? "Đang bật" : "Đang tắt",
                             InstanceId = id
