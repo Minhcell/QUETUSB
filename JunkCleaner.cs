@@ -12,6 +12,13 @@ namespace QuanLyHeThong
         public bool IsRecycleBin;
     }
 
+    /// <summary>Kết quả dọn một thư mục.</summary>
+    internal struct CleanResult
+    {
+        public long bytes;
+        public int items;
+    }
+
     internal static class JunkCleaner
     {
         public static List<JunkLocation> GetLocations()
@@ -56,11 +63,12 @@ namespace QuanLyHeThong
             return total;
         }
 
-        /// <summary>Dọn một thư mục: xoá nội dung bên trong, giữ lại thư mục gốc. Trả về (số byte đã xoá, số mục đã xoá).</summary>
-        public static (long bytes, int items) Clean(string path)
+        /// <summary>Dọn một thư mục: xoá nội dung bên trong, giữ lại thư mục gốc. Trả về số byte và số mục đã xoá.</summary>
+        public static CleanResult Clean(string path)
         {
+            var result = new CleanResult();
+            if (!Directory.Exists(path)) return result;
             long bytes = 0; int items = 0;
-            if (!Directory.Exists(path)) return (0, 0);
 
             // Xoá file trước
             try
@@ -90,7 +98,9 @@ namespace QuanLyHeThong
             }
             catch { }
 
-            return (bytes, items);
+            result.bytes = bytes;
+            result.items = items;
+            return result;
         }
 
         public static string FormatSize(long bytes)

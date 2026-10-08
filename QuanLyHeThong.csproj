@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net472</TargetFramework>
+    <TargetFramework>net452</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
@@ -10,8 +10,8 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>QuanLyHeThong</AssemblyName>
     <Product>Quản Lý Hệ Thống</Product>
-    <Version>1.1.0</Version>
-    <FileVersion>1.1.0.0</FileVersion>
+    <Version>1.2.0</Version>
+    <FileVersion>1.2.0.0</FileVersion>
     <Platforms>AnyCPU</Platforms>
     <Prefer32Bit>false</Prefer32Bit>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
@@ -19,13 +19,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Assembly khung của .NET Framework (WMI) -->
+    <!-- Assembly khung của .NET Framework (WMI) — nằm sẵn trong máy, không tạo file phụ -->
     <Reference Include="System.Management" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Cho phép build .NET Framework 4.7.2 trên máy CI của GitHub -->
-    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <!-- Chỉ để GitHub (máy CI) có bộ reference .NET Framework 4.5.2 khi build. Không đi kèm file đầu ra. -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net452" Version="1.0.3" PrivateAssets="all" />
   </ItemGroup>
 
 </Project>

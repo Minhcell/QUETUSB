@@ -77,10 +77,11 @@ namespace QuanLyHeThong
                         string prov = (o["DriverProviderName"] as string) ?? "";
                         string ver = (o["DriverVersion"] as string) ?? "";
                         string cls = (o["DeviceClass"] as string) ?? "";
+                        string wifiTag = IsWifi(dev + " " + prov + " " + cls) ? "(Wi-Fi) " : "";
                         list.Add(new SysItem
                         {
                             Kind = ItemKind.Driver,
-                            Name = inf + "  —  " + (string.IsNullOrEmpty(dev) ? cls : dev),
+                            Name = wifiTag + inf + "  —  " + (string.IsNullOrEmpty(dev) ? cls : dev),
                             Detail = (string.IsNullOrEmpty(prov) ? "" : "NSX: " + prov) +
                                      (string.IsNullOrEmpty(ver) ? "" : "  |  v" + ver),
                             Status = "",
@@ -109,10 +110,11 @@ namespace QuanLyHeThong
                         string conn = (o["NetConnectionID"] as string) ?? "";
                         string mac = (o["MACAddress"] as string) ?? "";
                         bool enabled = o["NetEnabled"] is bool && (bool)o["NetEnabled"];
+                        string wifiTag = IsWifi(name + " " + conn) ? "(Wi-Fi) " : "";
                         list.Add(new SysItem
                         {
                             Kind = ItemKind.Nic,
-                            Name = name,
+                            Name = wifiTag + name,
                             Detail = (string.IsNullOrEmpty(conn) ? "" : "Kết nối: " + conn + "  |  ") + "MAC: " + mac,
                             Status = enabled ? "Đang bật" : "Đang tắt",
                             InstanceId = id
@@ -127,6 +129,15 @@ namespace QuanLyHeThong
         private static SysItem ErrItem(ItemKind k, Exception ex)
         {
             return new SysItem { Kind = k, Name = "(Lỗi khi quét)", Detail = ex.Message, Status = "" };
+        }
+
+        /// <summary>Nhận diện thiết bị/driver không dây (Wi-Fi) theo từ khoá trong tên.</summary>
+        private static bool IsWifi(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return false;
+            string t = text.ToLowerInvariant();
+            return t.Contains("wi-fi") || t.Contains("wifi") || t.Contains("wireless")
+                || t.Contains("802.11") || t.Contains("wlan") || t.Contains("dual band");
         }
 
         // ====== XOÁ (chỉ chạy khi người dùng bấm nút, với các mục đã tích chọn) ======
