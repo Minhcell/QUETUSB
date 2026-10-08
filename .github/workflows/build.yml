@@ -12,6 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,7 +25,7 @@ jobs:
       - name: Restore
         run: dotnet restore QuanLyHeThong.csproj
 
-      - name: Build
+      - name: Build (.NET Framework 4.7.2 — chạy Win7+)
         run: dotnet publish QuanLyHeThong.csproj -c Release -o publish
 
       - name: Upload artifact
@@ -35,7 +36,7 @@ jobs:
             publish/QuanLyHeThong.exe
             publish/QuanLyHeThong.exe.config
 
-      - name: Release
+      - name: Release (khi đẩy tag vX.Y.Z)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
