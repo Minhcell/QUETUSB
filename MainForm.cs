@@ -18,7 +18,7 @@ namespace QuanLyHeThong
         // ===== Tab 2: Dọn rác / Temp =====
         private CheckedListBox clbJunk;
         private List<JunkLocation> junkLocations;
-        private Button btnMeasure, btnClean;
+        private Button btnMeasure, btnClean, btnClearRecent;
         private Label lblFreed;
         private TextBox txtLog3;
 
@@ -207,9 +207,12 @@ namespace QuanLyHeThong
             btnMeasure.Click += async delegate { await MeasureJunk(); };
             btnClean = new Button { Text = "Dọn ngay", Location = new Point(158, 7), Width = 120, Height = 30 };
             btnClean.Click += async delegate { await CleanJunk(); };
-            lblFreed = new Label { Text = "", Location = new Point(300, 13), AutoSize = true, ForeColor = Color.DarkGreen, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };
+            btnClearRecent = new Button { Text = "Xoá lịch sử file đã mở (Recent/Recommended)", Location = new Point(288, 7), Width = 290, Height = 30 };
+            btnClearRecent.Click += async delegate { await ClearRecentHistory(); };
+            lblFreed = new Label { Text = "", Location = new Point(588, 13), AutoSize = true, ForeColor = Color.DarkGreen, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };
             top.Controls.Add(btnMeasure);
             top.Controls.Add(btnClean);
+            top.Controls.Add(btnClearRecent);
             top.Controls.Add(lblFreed);
 
             txtLog3 = MakeLog();
@@ -224,7 +227,7 @@ namespace QuanLyHeThong
 
         private async Task MeasureJunk()
         {
-            SetBusy(true, btnMeasure, btnClean);
+            SetBusy(true, btnMeasure, btnClean, btnClearRecent);
             Log(txtLog3, "Đang tính dung lượng...");
             long total = 0;
             try
@@ -241,7 +244,27 @@ namespace QuanLyHeThong
                 lblFreed.Text = "Ước tính: " + JunkCleaner.FormatSize(total);
                 Log(txtLog3, "Tổng ước tính: " + JunkCleaner.FormatSize(total));
             }
-            finally { SetBusy(false, btnMeasure, btnClean); }
+            finally { SetBusy(false, btnMeasure, btnClean, btnClearRecent); }
+        }
+
+        private async Task ClearRecentHistory()
+        {
+            var r = MessageBox.Show(
+                "Xoá triệt để lịch sử file đã mở (Recent, mục Recommended trên Start, Quick Access trong File Explorer) " +
+                "và dọn các khoá Registry liên quan.\n\n" +
+                "Thanh taskbar sẽ nháy một cái do Explorer khởi động lại — bình thường.\n\nTiếp tục?",
+                "Xác nhận", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (r != DialogResult.Yes) return;
+
+            SetBusy(true, btnMeasure, btnClean, btnClearRecent);
+            Log(txtLog3, "Bắt đầu xoá lịch sử file đã mở...");
+            try
+            {
+                string msg = await Task.Run(() => RecentHistoryCleaner.ClearAll(line => Log(txtLog3, line)));
+                Log(txtLog3, msg);
+            }
+            catch (Exception ex) { Log(txtLog3, "Lỗi: " + ex.Message); }
+            finally { SetBusy(false, btnMeasure, btnClean, btnClearRecent); }
         }
 
         private async Task CleanJunk()
@@ -250,7 +273,7 @@ namespace QuanLyHeThong
                 "Xác nhận dọn rác", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
             if (r != DialogResult.Yes) return;
 
-            SetBusy(true, btnMeasure, btnClean);
+            SetBusy(true, btnMeasure, btnClean, btnClearRecent);
             Log(txtLog3, "Bắt đầu dọn...");
             long totalBytes = 0; int totalItems = 0;
             try
@@ -273,7 +296,7 @@ namespace QuanLyHeThong
                 Log(txtLog3, "HOÀN TẤT. Tổng cộng xoá " + totalItems + " mục, giải phóng " + JunkCleaner.FormatSize(totalBytes) + ".");
             }
             catch (Exception ex) { Log(txtLog3, "Lỗi: " + ex.Message); }
-            finally { SetBusy(false, btnMeasure, btnClean); }
+            finally { SetBusy(false, btnMeasure, btnClean, btnClearRecent); }
         }
 
         // ============================================================
