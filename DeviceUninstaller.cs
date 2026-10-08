@@ -118,6 +118,29 @@ namespace QuanLyHeThong
             }
         }
 
+        /// <summary>Lấy tập Instance ID của mọi thiết bị ĐANG hiện diện (để đánh dấu USB đang cắm vs lịch sử).</summary>
+        public static System.Collections.Generic.HashSet<string> GetPresentInstanceIds()
+        {
+            var set = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            IntPtr devInfo = SetupDiGetClassDevs(IntPtr.Zero, null, IntPtr.Zero, DIGCF_PRESENT | DIGCF_ALLCLASSES);
+            if (devInfo == IntPtr.Zero || devInfo == new IntPtr(-1)) return set;
+            try
+            {
+                var data = new SP_DEVINFO_DATA();
+                data.cbSize = (uint)Marshal.SizeOf(typeof(SP_DEVINFO_DATA));
+                uint index = 0;
+                while (SetupDiEnumDeviceInfo(devInfo, index, ref data))
+                {
+                    index++;
+                    string id = GetInstanceId(devInfo, ref data);
+                    if (!string.IsNullOrEmpty(id)) set.Add(id);
+                }
+            }
+            catch { }
+            finally { SetupDiDestroyDeviceInfoList(devInfo); }
+            return set;
+        }
+
         private static string GetInstanceId(IntPtr devInfo, ref SP_DEVINFO_DATA data)
         {
             var sb = new StringBuilder(512);

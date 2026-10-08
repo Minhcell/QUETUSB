@@ -23,8 +23,20 @@ namespace QuanLyHeThong
         private TextBox txtLog3;
 
         // ===== Tab 3: Khoá / Mở cổng USB =====
-        private Label lblUsbStatus;
+        private Label lblUsbStatus, lblPolicyStatus;
         private Button btnLockUsb, btnUnlockUsb;
+        private Button btnDenyAll, btnAllowPolicy, btnReadOnly, btnReadWrite;
+
+        // ===== Tab 4: USB chi tiết (kiểu USBDeview) =====
+        private ListView lvUsbHist;
+        private Button btnScanUsbHist, btnDeleteUsbHist, btnCheckAllUsbHist;
+        private CheckBox chkOnlyHistory;
+        private TextBox txtLog4;
+
+        // ===== Tab 5: Kích hoạt Windows / Office (chỉ kiểm tra) =====
+        private Button btnCheckActivation, btnCheckOffice;
+        private Label lblActivation;
+        private TextBox txtActivation;
 
         public MainForm()
         {
@@ -36,8 +48,10 @@ namespace QuanLyHeThong
 
             var tabs = new TabControl { Dock = DockStyle.Fill };
             tabs.TabPages.Add(BuildTabDevices());
+            tabs.TabPages.Add(BuildTabUsbHistory());
             tabs.TabPages.Add(BuildTabJunk());
             tabs.TabPages.Add(BuildTabUsb());
+            tabs.TabPages.Add(BuildTabActivation());
 
             var banner = new Label
             {
@@ -191,11 +205,134 @@ namespace QuanLyHeThong
         }
 
         // ============================================================
-        // TAB 2 — Dọn rác / Temp
+        // TAB 2 — USB chi tiết kiểu USBDeview (đang cắm + lịch sử)
+        // ============================================================
+        private TabPage BuildTabUsbHistory()
+        {
+            var tab = new TabPage("2. USB chi tiết (USBDeview)");
+
+            var top = new Panel { Dock = DockStyle.Top, Height = 44, Padding = new Padding(8) };
+            btnScanUsbHist = new Button { Text = "Quét USB (đang cắm + lịch sử)", Location = new Point(8, 7), Width = 220, Height = 30 };
+            btnScanUsbHist.Click += async delegate { await ScanUsbHistory(); };
+            chkOnlyHistory = new CheckBox { Text = "Chỉ hiện USB lịch sử (không cắm)", AutoSize = true, Location = new Point(238, 13) };
+            chkOnlyHistory.CheckedChanged += delegate { ApplyUsbHistFilter(); };
+            top.Controls.Add(btnScanUsbHist);
+            top.Controls.Add(chkOnlyHistory);
+
+            lvUsbHist = new ListView
+            {
+                Dock = DockStyle.Fill,
+                View = View.Details,
+                CheckBoxes = true,
+                FullRowSelect = true,
+                GridLines = true
+            };
+            lvUsbHist.Columns.Add("Mô tả", 300);
+            lvUsbHist.Columns.Add("VID/PID", 160);
+            lvUsbHist.Columns.Add("Số seri / Instance", 220);
+            lvUsbHist.Columns.Add("Loại", 80);
+            lvUsbHist.Columns.Add("Hiện diện", 90);
+
+            var mid = new Panel { Dock = DockStyle.Top, Height = 44, Padding = new Padding(8, 6, 8, 6) };
+            btnCheckAllUsbHist = new Button { Text = "Chọn/Bỏ tất cả", Location = new Point(8, 7), Width = 130, Height = 30 };
+            btnCheckAllUsbHist.Click += delegate { ToggleAllUsbHist(); };
+            btnDeleteUsbHist = new Button { Text = "Xoá mục đã chọn (+ Registry)", Location = new Point(148, 7), Width = 220, Height = 30 };
+            btnDeleteUsbHist.Click += async delegate { await DeleteUsbHistory(); };
+            mid.Controls.Add(btnCheckAllUsbHist);
+            mid.Controls.Add(btnDeleteUsbHist);
+
+            txtLog4 = MakeLog();
+            var logHost = new Panel { Dock = DockStyle.Bottom, Height = 150, Padding = new Padding(8, 0, 8, 8) };
+            logHost.Controls.Add(txtLog4);
+
+            tab.Controls.Add(lvUsbHist);
+            tab.Controls.Add(mid);
+            tab.Controls.Add(top);
+            tab.Controls.Add(logHost);
+            return tab;
+        }
+
+        private List<UsbRecord> usbHistAll = new List<UsbRecord>();
+
+        private async Task ScanUsbHistory()
+        {
+            SetBusy(true, btnScanUsbHist, btnDeleteUsbHist, btnCheckAllUsbHist);
+            Log(txtLog4, "Đang quét USB ngoại vi (đang cắm + đã từng cắm) từ Registry...");
+            try
+            {
+                usbHistAll = await Task.Run(() => UsbHistoryScanner.ScanAll());
+                ApplyUsbHistFilter();
+                int present = 0;
+                foreach (var r in usbHistAll) if (r.Present) present++;
+                Log(txtLog4, "Quét xong: tổng " + usbHistAll.Count + " thiết bị (" + present + " đang cắm, " +
+                    (usbHistAll.Count - present) + " lịch sử). Tích chọn rồi bấm 'Xoá mục đã chọn'.");
+            }
+            catch (Exception ex) { Log(txtLog4, "Lỗi: " + ex.Message); }
+            finally { SetBusy(false, btnScanUsbHist, btnDeleteUsbHist, btnCheckAllUsbHist); }
+        }
+
+        private void ApplyUsbHistFilter()
+        {
+            if (lvUsbHist == null) return;
+            bool onlyHist = chkOnlyHistory.Checked;
+            lvUsbHist.BeginUpdate();
+            lvUsbHist.Items.Clear();
+            foreach (var r in usbHistAll)
+            {
+                if (onlyHist && r.Present) continue;
+                var lvi = new ListViewItem(r.Description);
+                lvi.SubItems.Add(r.VidPid);
+                lvi.SubItems.Add(r.Serial);
+                lvi.SubItems.Add(r.Type);
+                lvi.SubItems.Add(r.Present ? "Đang cắm" : "Lịch sử");
+                lvi.Tag = r;
+                lvUsbHist.Items.Add(lvi);
+            }
+            lvUsbHist.EndUpdate();
+        }
+
+        private void ToggleAllUsbHist()
+        {
+            bool anyUnchecked = false;
+            foreach (ListViewItem lvi in lvUsbHist.Items) if (!lvi.Checked) { anyUnchecked = true; break; }
+            foreach (ListViewItem lvi in lvUsbHist.Items) lvi.Checked = anyUnchecked;
+        }
+
+        private async Task DeleteUsbHistory()
+        {
+            var chosen = new List<UsbRecord>();
+            foreach (ListViewItem lvi in lvUsbHist.Items)
+                if (lvi.Checked && lvi.Tag is UsbRecord) chosen.Add((UsbRecord)lvi.Tag);
+
+            if (chosen.Count == 0) { MessageBox.Show("Chưa chọn mục nào."); return; }
+
+            var r = MessageBox.Show(
+                "Sẽ xoá " + chosen.Count + " thiết bị USB đã chọn khỏi hệ thống và xoá dấu vết trong Registry.\n\n" +
+                "Thiết bị đang cắm sẽ bị gỡ; thiết bị lịch sử sẽ bị xoá khỏi Registry.\n\nTiếp tục?",
+                "Xác nhận xoá", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (r != DialogResult.Yes) return;
+
+            SetBusy(true, btnScanUsbHist, btnDeleteUsbHist, btnCheckAllUsbHist);
+            Log(txtLog4, "Đang xoá " + chosen.Count + " thiết bị...");
+            try
+            {
+                await Task.Run(() =>
+                {
+                    foreach (var rec in chosen)
+                        Log(txtLog4, UsbHistoryScanner.Remove(rec));
+                });
+                Log(txtLog4, "Hoàn tất. Nên quét lại để cập nhật danh sách.");
+            }
+            catch (Exception ex) { Log(txtLog4, "Lỗi: " + ex.Message); }
+            finally { SetBusy(false, btnScanUsbHist, btnDeleteUsbHist, btnCheckAllUsbHist); }
+        }
+
+        // ============================================================
+        // TAB 3 — Dọn rác / Temp
         // ============================================================
         private TabPage BuildTabJunk()
         {
-            var tab = new TabPage("2. Dọn rác / Temp");
+            var tab = new TabPage("3. Dọn rác / Temp");
 
             junkLocations = JunkCleaner.GetLocations();
             clbJunk = new CheckedListBox { Dock = DockStyle.Fill, CheckOnClick = true, IntegralHeight = false };
@@ -304,7 +441,7 @@ namespace QuanLyHeThong
         // ============================================================
         private TabPage BuildTabUsb()
         {
-            var tab = new TabPage("3. Khoá / Mở cổng USB");
+            var tab = new TabPage("4. Khoá / Mở cổng USB");
 
             lblUsbStatus = new Label
             {
@@ -321,21 +458,51 @@ namespace QuanLyHeThong
 
             var note = new Label
             {
-                Location = new Point(24, 140),
-                Size = new Size(820, 160),
+                Location = new Point(24, 128),
+                Size = new Size(860, 60),
                 Text =
-                    "• Chức năng này khoá/mở cổng USB đối với THIẾT BỊ LƯU TRỮ ngoài (USB, ổ cứng di động) bằng cách " +
-                    "đổi giá trị dịch vụ USBSTOR trong Registry.\r\n\r\n" +
-                    "• Bàn phím, chuột USB và các thiết bị khác KHÔNG bị ảnh hưởng — phù hợp để bảo mật, chống sao chép dữ liệu.\r\n\r\n" +
-                    "• Khi KHOÁ: thiết bị lưu trữ cắm vào sẽ không nhận. Thiết bị đang cắm có thể cần rút ra cắm lại.\r\n\r\n" +
-                    "• Khi MỞ: cho phép thiết bị lưu trữ USB hoạt động bình thường trở lại.",
+                    "• Mức 1 (USBSTOR): khoá/mở USB lưu trữ ngoài; chuột, bàn phím USB KHÔNG bị ảnh hưởng.\r\n" +
+                    "• Thiết bị đang cắm có thể cần rút ra cắm lại để áp dụng.",
                 ForeColor = Color.FromArgb(60, 60, 60)
+            };
+
+            // ----- Mức mạnh hơn: Group Policy + Write Protect -----
+            var lblStrong = new Label
+            {
+                Location = new Point(24, 196),
+                AutoSize = true,
+                Font = new Font("Segoe UI", 10.5f, FontStyle.Bold),
+                Text = "Mức mạnh hơn (chặn cả điện thoại, thẻ nhớ / chống copy ra):"
+            };
+
+            btnDenyAll = new Button { Text = "⛔ CHẶN toàn bộ thiết bị di động", Location = new Point(24, 228), Width = 260, Height = 44 };
+            btnDenyAll.Click += async delegate { await DoPolicy(() => UsbGuard.SetDenyAll(true)); };
+            btnAllowPolicy = new Button { Text = "✔ BỎ chặn (toàn bộ)", Location = new Point(300, 228), Width = 180, Height = 44 };
+            btnAllowPolicy.Click += async delegate { await DoPolicy(() => UsbGuard.SetDenyAll(false)); };
+
+            btnReadOnly = new Button { Text = "📄 Chỉ ĐỌC (cấm copy ra)", Location = new Point(24, 284), Width = 260, Height = 44 };
+            btnReadOnly.Click += async delegate { await DoPolicy(() => UsbGuard.SetWriteProtect(true)); };
+            btnReadWrite = new Button { Text = "✏ Cho GHI lại", Location = new Point(300, 284), Width = 180, Height = 44 };
+            btnReadWrite.Click += async delegate { await DoPolicy(() => UsbGuard.SetWriteProtect(false)); };
+
+            lblPolicyStatus = new Label
+            {
+                Location = new Point(24, 340),
+                Size = new Size(860, 70),
+                ForeColor = Color.FromArgb(60, 60, 60),
+                Text = "Trạng thái nâng cao: (đang kiểm tra)"
             };
 
             tab.Controls.Add(lblUsbStatus);
             tab.Controls.Add(btnLockUsb);
             tab.Controls.Add(btnUnlockUsb);
             tab.Controls.Add(note);
+            tab.Controls.Add(lblStrong);
+            tab.Controls.Add(btnDenyAll);
+            tab.Controls.Add(btnAllowPolicy);
+            tab.Controls.Add(btnReadOnly);
+            tab.Controls.Add(btnReadWrite);
+            tab.Controls.Add(lblPolicyStatus);
             return tab;
         }
 
@@ -354,8 +521,33 @@ namespace QuanLyHeThong
             }
         }
 
+        private async Task DoPolicy(Func<string> action)
+        {
+            SetBusy(true, btnDenyAll, btnAllowPolicy, btnReadOnly, btnReadWrite);
+            try
+            {
+                string msg = await Task.Run(action);
+                MessageBox.Show(msg, "Kết quả", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            finally
+            {
+                SetBusy(false, btnDenyAll, btnAllowPolicy, btnReadOnly, btnReadWrite);
+                RefreshUsbStatus();
+            }
+        }
+
         private void RefreshUsbStatus()
         {
+            bool? denyAll = UsbGuard.IsDenyAll();
+            bool? readOnly = UsbGuard.IsWriteProtect();
+            if (lblPolicyStatus != null)
+            {
+                string s1 = denyAll == true ? "⛔ Đang CHẶN toàn bộ thiết bị di động" : "Không chặn toàn bộ";
+                string s2 = readOnly == true ? "📄 USB đang CHỈ ĐỌC (chống copy)" : "Cho ghi bình thường";
+                lblPolicyStatus.Text = "Trạng thái nâng cao:\r\n• " + s1 + "\r\n• " + s2;
+                lblPolicyStatus.ForeColor = (denyAll == true || readOnly == true) ? Color.Firebrick : Color.SeaGreen;
+            }
+
             bool? locked = UsbGuard.IsLocked();
             if (locked == null)
             {
@@ -372,6 +564,105 @@ namespace QuanLyHeThong
                 lblUsbStatus.Text = "Trạng thái: 🔓 ĐANG MỞ (cho phép USB lưu trữ)";
                 lblUsbStatus.ForeColor = Color.SeaGreen;
             }
+        }
+
+        // ============================================================
+        // TAB 5 — Kiểm tra trạng thái kích hoạt Windows (chỉ đọc)
+        // ============================================================
+        private TabPage BuildTabActivation()
+        {
+            var tab = new TabPage("5. Kích hoạt Windows / Office");
+
+            var top = new Panel { Dock = DockStyle.Top, Height = 44, Padding = new Padding(8) };
+            btnCheckActivation = new Button { Text = "Kiểm tra Windows", Location = new Point(8, 7), Width = 180, Height = 30 };
+            btnCheckActivation.Click += async delegate { await CheckActivation(); };
+            btnCheckOffice = new Button { Text = "Kiểm tra Office", Location = new Point(198, 7), Width = 180, Height = 30 };
+            btnCheckOffice.Click += async delegate { await CheckOffice(); };
+            top.Controls.Add(btnCheckActivation);
+            top.Controls.Add(btnCheckOffice);
+
+            lblActivation = new Label
+            {
+                Dock = DockStyle.Top,
+                Height = 34,
+                Padding = new Padding(10, 8, 0, 0),
+                Font = new Font("Segoe UI", 11f, FontStyle.Bold),
+                Text = "Trạng thái: (bấm Kiểm tra)"
+            };
+
+            txtActivation = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Multiline = true,
+                ReadOnly = true,
+                ScrollBars = ScrollBars.Vertical,
+                BackColor = Color.FromArgb(24, 24, 24),
+                ForeColor = Color.Gainsboro,
+                Font = new Font("Consolas", 9.5f)
+            };
+
+            var note = new Label
+            {
+                Dock = DockStyle.Bottom,
+                Height = 70,
+                Padding = new Padding(10, 6, 10, 6),
+                ForeColor = Color.FromArgb(60, 60, 60),
+                Text = "Tab này chỉ KIỂM TRA, không thay đổi gì. Nếu máy chưa kích hoạt, hãy vào " +
+                       "Settings → System → Activation để nhập key hoặc kích hoạt qua máy chủ KMS của cơ quan."
+            };
+
+            var fill = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8) };
+            fill.Controls.Add(txtActivation);
+
+            tab.Controls.Add(fill);
+            tab.Controls.Add(note);
+            tab.Controls.Add(lblActivation);
+            tab.Controls.Add(top);
+            return tab;
+        }
+
+        private async Task CheckActivation()
+        {
+            SetBusy(true, btnCheckActivation, btnCheckOffice);
+            txtActivation.Text = "Đang kiểm tra Windows...";
+            try
+            {
+                string report = await Task.Run(() => WindowsActivation.GetStatus());
+                bool? act = await Task.Run(() => WindowsActivation.IsActivated());
+                txtActivation.Text = report.Replace("\n", Environment.NewLine);
+                if (act == true)
+                {
+                    lblActivation.Text = "Trạng thái: ✔ Windows ĐÃ kích hoạt";
+                    lblActivation.ForeColor = Color.SeaGreen;
+                }
+                else if (act == false)
+                {
+                    lblActivation.Text = "Trạng thái: ✘ Windows CHƯA kích hoạt";
+                    lblActivation.ForeColor = Color.Firebrick;
+                }
+                else
+                {
+                    lblActivation.Text = "Trạng thái: (không xác định)";
+                    lblActivation.ForeColor = Color.Gray;
+                }
+            }
+            catch (Exception ex) { txtActivation.Text = "Lỗi: " + ex.Message; }
+            finally { SetBusy(false, btnCheckActivation, btnCheckOffice); }
+        }
+
+        private async Task CheckOffice()
+        {
+            SetBusy(true, btnCheckActivation, btnCheckOffice);
+            txtActivation.Text = "Đang kiểm tra Office...";
+            try
+            {
+                string report = await Task.Run(() => OfficeActivation.GetStatus());
+                txtActivation.Text = ("=== TRẠNG THÁI OFFICE ===\n\n" + report).Replace("\n", Environment.NewLine);
+                lblActivation.Text = "Trạng thái: xem chi tiết Office bên dưới";
+                lblActivation.ForeColor = Color.FromArgb(33, 48, 74);
+            }
+            catch (Exception ex) { txtActivation.Text = "Lỗi: " + ex.Message; }
+            finally { SetBusy(false, btnCheckActivation, btnCheckOffice); }
         }
 
         // ============================================================
