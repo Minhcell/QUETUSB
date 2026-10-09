@@ -24,6 +24,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- PsExec (Microsoft Sysinternals) do người dùng cung cấp — chép ra cạnh exe để app tự dùng khi xoá USB -->
+    <Content Include="PsExec.exe">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Chỉ để GitHub (máy CI) có bộ reference .NET Framework 4.5.2 khi build. Không đi kèm file đầu ra. -->
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net452" Version="1.0.3" PrivateAssets="all" />
   </ItemGroup>

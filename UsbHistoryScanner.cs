@@ -16,6 +16,8 @@ namespace QuanLyHeThong
         public string InstanceId;    // vd USB\VID_xxxx&PID_xxxx\seri
         public string EnumRoot;      // "USB" hoặc "USBSTOR"
         public string ParentRel;     // vd VID_xxxx&PID_xxxx  (khoá cha dưới Enum\<root>)
+        public string Service;       // dịch vụ driver (usbhub, hidusb, usbvideo...)
+        public bool Protected;       // true = thiết bị hệ thống (hub/chuột/phím/camera...) — nên GIỮ, không xoá
     }
 
     /// <summary>
@@ -58,6 +60,7 @@ namespace QuanLyHeThong
                                 {
                                     if (dev == null) continue;
                                     string instanceId = root + "\\" + parentName + "\\" + serial;
+                                    string service = (dev.GetValue("Service") as string) ?? "";
                                     var rec = new UsbRecord
                                     {
                                         Type = root,
@@ -67,7 +70,9 @@ namespace QuanLyHeThong
                                         EnumRoot = root,
                                         ParentRel = parentName,
                                         Present = present.Contains(instanceId),
-                                        Description = BuildDesc(dev, parentName)
+                                        Description = BuildDesc(dev, parentName),
+                                        Service = service,
+                                        Protected = IsSystemDevice(service, parentName)
                                     };
                                     list.Add(rec);
                                 }
@@ -96,6 +101,31 @@ namespace QuanLyHeThong
             int i = s.LastIndexOf(';');
             if (i >= 0 && i < s.Length - 1) return s.Substring(i + 1).Trim();
             return s.Trim();
+        }
+
+        /// <summary>Nhận diện thiết bị HỆ THỐNG cần giữ (hub, chuột, phím, camera, bluetooth, loa) theo dịch vụ driver.</summary>
+        private static bool IsSystemDevice(string service, string parentName)
+        {
+            if (parentName != null && parentName.StartsWith("ROOT_HUB", StringComparison.OrdinalIgnoreCase))
+                return true;
+            string s = (service ?? "").ToLowerInvariant();
+            if (s.Length == 0) return false;
+            // Hub USB
+            if (s.Contains("usbhub") || s.Contains("hub3") || s.Contains("usbxhci") || s.Contains("usbehci"))
+                return true;
+            // Chuột / bàn phím / HID
+            if (s == "hidusb" || s == "kbdhid" || s == "mouhid" || s == "kbdclass" || s == "mouclass" || s.Contains("hidclass"))
+                return true;
+            // Camera / webcam
+            if (s == "usbvideo" || s.Contains("ksthunk") || s.Contains("stream"))
+                return true;
+            // Loa / mic USB
+            if (s == "usbaudio" || s.Contains("usbaudio2"))
+                return true;
+            // Bluetooth
+            if (s.Contains("bthusb") || s.Contains("bth"))
+                return true;
+            return false;
         }
 
         private static string ExtractVidPid(string parentName)

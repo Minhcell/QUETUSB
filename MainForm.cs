@@ -30,7 +30,7 @@ namespace QuanLyHeThong
         // ===== Tab 4: USB chi tiết (kiểu USBDeview) =====
         private ListView lvUsbHist;
         private Button btnScanUsbHist, btnDeleteUsbHist, btnCheckAllUsbHist;
-        private CheckBox chkOnlyHistory;
+        private CheckBox chkOnlyHistory, chkProtectSystem;
         private TextBox txtLog4;
 
         // ===== Tab 5: Kích hoạt Windows / Office (chỉ kiểm tra) =====
@@ -234,8 +234,10 @@ namespace QuanLyHeThong
             btnScanUsbHist.Click += async delegate { await ScanUsbHistory(); };
             chkOnlyHistory = new CheckBox { Text = "Chỉ hiện USB lịch sử (không cắm)", AutoSize = true, Location = new Point(238, 13) };
             chkOnlyHistory.CheckedChanged += delegate { ApplyUsbHistFilter(); };
+            chkProtectSystem = new CheckBox { Text = "Bảo vệ thiết bị hệ thống (hub/chuột/phím/camera) — không xoá", AutoSize = true, Location = new Point(470, 13), Checked = true };
             top.Controls.Add(btnScanUsbHist);
             top.Controls.Add(chkOnlyHistory);
+            top.Controls.Add(chkProtectSystem);
 
             lvUsbHist = new ListView
             {
@@ -250,6 +252,7 @@ namespace QuanLyHeThong
             lvUsbHist.Columns.Add("Số seri / Instance", 220);
             lvUsbHist.Columns.Add("Loại", 80);
             lvUsbHist.Columns.Add("Hiện diện", 90);
+            lvUsbHist.Columns.Add("Phân loại", 150);
 
             var mid = new Panel { Dock = DockStyle.Top, Height = 44, Padding = new Padding(8, 6, 8, 6) };
             btnCheckAllUsbHist = new Button { Text = "Chọn/Bỏ tất cả", Location = new Point(8, 7), Width = 130, Height = 30 };
@@ -303,7 +306,9 @@ namespace QuanLyHeThong
                 lvi.SubItems.Add(r.Serial);
                 lvi.SubItems.Add(r.Type);
                 lvi.SubItems.Add(r.Present ? "Đang cắm" : "Lịch sử");
+                lvi.SubItems.Add(r.Protected ? "⚠ Hệ thống (giữ)" : "Cắm ngoài");
                 lvi.Tag = r;
+                if (r.Protected) lvi.ForeColor = System.Drawing.Color.Gray;
                 lvUsbHist.Items.Add(lvi);
             }
             lvUsbHist.EndUpdate();
@@ -319,14 +324,29 @@ namespace QuanLyHeThong
         private async Task DeleteUsbHistory()
         {
             var chosen = new List<UsbRecord>();
+            int skipped = 0;
             foreach (ListViewItem lvi in lvUsbHist.Items)
-                if (lvi.Checked && lvi.Tag is UsbRecord) chosen.Add((UsbRecord)lvi.Tag);
+                if (lvi.Checked && lvi.Tag is UsbRecord)
+                {
+                    var rec = (UsbRecord)lvi.Tag;
+                    // Bảo vệ thiết bị hệ thống: bỏ qua khi ô bảo vệ đang bật
+                    if (chkProtectSystem.Checked && rec.Protected) { skipped++; continue; }
+                    chosen.Add(rec);
+                }
 
-            if (chosen.Count == 0) { MessageBox.Show("Chưa chọn mục nào."); return; }
+            if (chosen.Count == 0)
+            {
+                MessageBox.Show(skipped > 0
+                    ? "Các mục đã chọn đều là thiết bị hệ thống (hub/chuột/phím/camera) đang được bảo vệ nên không xoá. " +
+                      "Nếu thực sự muốn xoá, bỏ tích ô 'Bảo vệ thiết bị hệ thống'."
+                    : "Chưa chọn mục nào.");
+                return;
+            }
 
             var r = MessageBox.Show(
-                "Sẽ xoá " + chosen.Count + " thiết bị USB đã chọn khỏi hệ thống và xoá dấu vết trong Registry.\n\n" +
-                "Thiết bị đang cắm sẽ bị gỡ; thiết bị lịch sử sẽ bị xoá khỏi Registry.\n\nTiếp tục?",
+                "Sẽ xoá " + chosen.Count + " thiết bị USB cắm ngoài đã chọn và xoá dấu vết trong Registry." +
+                (skipped > 0 ? "\n(Đã bỏ qua " + skipped + " thiết bị hệ thống được bảo vệ.)" : "") +
+                "\n\nLưu ý: KHÔNG xoá driver — cắm lại Windows tự nhận, không phải cài lại.\n\nTiếp tục?",
                 "Xác nhận xoá", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
             if (r != DialogResult.Yes) return;
 
