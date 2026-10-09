@@ -150,9 +150,10 @@ namespace QuanLyHeThong
         {
             var paths = new List<string>();
 
-            // 1) Enum\USB + Enum\USBSTOR: lấy thiết bị KHÔNG được bảo vệ (bỏ hub/chuột/phím/camera/bluetooth/card mạng)
+            // 1) Enum\USB + Enum\USBSTOR: chỉ lấy thiết bị cắm ngoài ĐÃ RÚT (lịch sử) và KHÔNG được bảo vệ.
+            //    Bỏ qua: thiết bị ĐANG CẮM (Windows tạo lại ngay, không xoá được), hub/chuột/phím/camera/bluetooth/card mạng/WiFi.
             foreach (var rec in ScanAll())
-                if (!rec.Protected)
+                if (!rec.Protected && !rec.Present)
                     paths.Add(@"SYSTEM\CurrentControlSet\Enum\" + rec.InstanceId);
 
             // 2) Các nơi khác chỉ chứa thiết bị cắm ngoài (điện thoại/MTP/thẻ nhớ) -> gom toàn bộ khoá con
