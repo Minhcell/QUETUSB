@@ -61,6 +61,7 @@ namespace QuanLyHeThong
                                     if (dev == null) continue;
                                     string instanceId = root + "\\" + parentName + "\\" + serial;
                                     string service = (dev.GetValue("Service") as string) ?? "";
+                                    string classGuid = (dev.GetValue("ClassGUID") as string) ?? "";
                                     var rec = new UsbRecord
                                     {
                                         Type = root,
@@ -72,7 +73,7 @@ namespace QuanLyHeThong
                                         Present = present.Contains(instanceId),
                                         Description = BuildDesc(dev, parentName),
                                         Service = service,
-                                        Protected = IsSystemDevice(service, parentName)
+                                        Protected = IsSystemDevice(service, parentName) || IsNetClass(classGuid)
                                     };
                                     list.Add(rec);
                                 }
@@ -128,10 +129,52 @@ namespace QuanLyHeThong
             return false;
         }
 
+        // Net class = card mạng / USB WiFi-LAN -> bảo vệ (không xoá, giữ WiFi)
+        private static bool IsNetClass(string classGuid)
+        {
+            return !string.IsNullOrEmpty(classGuid) &&
+                   classGuid.IndexOf("4D36E972-E325-11CE-BFC1-08002BE10318", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         private static string ExtractVidPid(string parentName)
         {
             var m = Regex.Match(parentName, @"VID_[0-9A-Fa-f]{4}&PID_[0-9A-Fa-f]{4}");
             return m.Success ? m.Value : parentName;
+        }
+
+        /// <summary>
+        /// Gom MỌI đường dẫn lịch sử USB cắm ngoài trong HKLM (trừ thiết bị hệ thống &amp; card mạng).
+        /// KHÔNG đụng tới DriverStore / gói driver (oem*.inf) nên không xoá driver USB hay WiFi.
+        /// </summary>
+        public static List<string> CollectExternalHistoryHklm()
+        {
+            var paths = new List<string>();
+
+            // 1) Enum\USB + Enum\USBSTOR: lấy thiết bị KHÔNG được bảo vệ (bỏ hub/chuột/phím/camera/bluetooth/card mạng)
+            foreach (var rec in ScanAll())
+                if (!rec.Protected)
+                    paths.Add(@"SYSTEM\CurrentControlSet\Enum\" + rec.InstanceId);
+
+            // 2) Các nơi khác chỉ chứa thiết bị cắm ngoài (điện thoại/MTP/thẻ nhớ) -> gom toàn bộ khoá con
+            AddAllSubKeys(paths, @"SYSTEM\CurrentControlSet\Enum\WpdBusEnumRoot");
+            AddAllSubKeys(paths, @"SYSTEM\CurrentControlSet\Enum\SWD\WPDBUSENUM");
+            AddAllSubKeys(paths, @"SOFTWARE\Microsoft\Windows Portable Devices\Devices");
+
+            return paths;
+        }
+
+        private static void AddAllSubKeys(List<string> paths, string basePath)
+        {
+            try
+            {
+                using (var k = Registry.LocalMachine.OpenSubKey(basePath, false))
+                {
+                    if (k == null) return;
+                    foreach (var name in k.GetSubKeyNames())
+                        paths.Add(basePath + "\\" + name);
+                }
+            }
+            catch { }
         }
 
         /// <summary>Xoá một thiết bị: nếu đang cắm thì gỡ qua SetupAPI, rồi xoá dấu vết Registry.</summary>

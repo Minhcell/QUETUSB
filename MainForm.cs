@@ -29,7 +29,7 @@ namespace QuanLyHeThong
 
         // ===== Tab 4: USB chi tiết (kiểu USBDeview) =====
         private ListView lvUsbHist;
-        private Button btnScanUsbHist, btnDeleteUsbHist, btnCheckAllUsbHist;
+        private Button btnScanUsbHist, btnDeleteUsbHist, btnCheckAllUsbHist, btnSweepHklm;
         private CheckBox chkOnlyHistory, chkProtectSystem;
         private TextBox txtLog4;
 
@@ -259,8 +259,11 @@ namespace QuanLyHeThong
             btnCheckAllUsbHist.Click += delegate { ToggleAllUsbHist(); };
             btnDeleteUsbHist = new Button { Text = "Xoá mục đã chọn (+ Registry)", Location = new Point(148, 7), Width = 220, Height = 30 };
             btnDeleteUsbHist.Click += async delegate { await DeleteUsbHistory(); };
+            btnSweepHklm = new Button { Text = "Kiểm tra & xoá toàn bộ lịch sử USB cắm ngoài (HKLM)", Location = new Point(378, 7), Width = 340, Height = 30 };
+            btnSweepHklm.Click += async delegate { await SweepHklmHistory(); };
             mid.Controls.Add(btnCheckAllUsbHist);
             mid.Controls.Add(btnDeleteUsbHist);
+            mid.Controls.Add(btnSweepHklm);
 
             txtLog4 = MakeLog();
             var logHost = new Panel { Dock = DockStyle.Bottom, Height = 150, Padding = new Padding(8, 0, 8, 8) };
@@ -371,6 +374,40 @@ namespace QuanLyHeThong
             }
             catch (Exception ex) { Log(txtLog4, "Lỗi: " + ex.Message); }
             finally { SetBusy(false, btnScanUsbHist, btnDeleteUsbHist, btnCheckAllUsbHist); }
+        }
+
+        private async Task SweepHklmHistory()
+        {
+            SetBusy(true, btnScanUsbHist, btnDeleteUsbHist, btnCheckAllUsbHist, btnSweepHklm);
+            Log(txtLog4, "Đang kiểm tra toàn bộ HKLM tìm lịch sử USB cắm ngoài...");
+            try
+            {
+                var paths = await Task.Run(() => UsbHistoryScanner.CollectExternalHistoryHklm());
+                if (paths.Count == 0)
+                {
+                    Log(txtLog4, "✔ Không tìm thấy lịch sử USB cắm ngoài nào trong HKLM.");
+                    MessageBox.Show("Không có lịch sử USB cắm ngoài nào trong HKLM.", "Kết quả",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                var r = MessageBox.Show(
+                    "Tìm thấy " + paths.Count + " mục lịch sử USB cắm ngoài trong HKLM " +
+                    "(USB, USBSTOR, điện thoại/MTP, thiết bị di động...).\n\n" +
+                    "Sẽ xoá toàn bộ. KHÔNG xoá driver USB và KHÔNG xoá driver/card WiFi " +
+                    "(đã tự bỏ qua hub, chuột, phím, camera, bluetooth, card mạng).\n\nTiếp tục?",
+                    "Xác nhận xoá lịch sử USB (HKLM)", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                if (r != DialogResult.Yes) return;
+
+                await Task.Run(() =>
+                {
+                    Log(txtLog4, "Xoá " + paths.Count + " mục bằng quyền SYSTEM...");
+                    Log(txtLog4, SystemRegCleaner.DeleteKeysAsSystem(paths, line => Log(txtLog4, line)));
+                });
+                Log(txtLog4, "Hoàn tất. Nên quét lại để cập nhật danh sách.");
+            }
+            catch (Exception ex) { Log(txtLog4, "Lỗi: " + ex.Message); }
+            finally { SetBusy(false, btnScanUsbHist, btnDeleteUsbHist, btnCheckAllUsbHist, btnSweepHklm); }
         }
 
         // ============================================================
