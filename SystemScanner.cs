@@ -182,6 +182,23 @@ namespace QuanLyHeThong
             catch { return false; }
         }
 
+        /// <summary>Liệt kê đường dẫn các khoá con dưới Enum\USBSTOR (để xoá bằng quyền SYSTEM).</summary>
+        public static System.Collections.Generic.List<string> GetUsbStorSubPaths()
+        {
+            var list = new System.Collections.Generic.List<string>();
+            try
+            {
+                using (var usbstor = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Enum\USBSTOR", false))
+                {
+                    if (usbstor == null) return list;
+                    foreach (var name in usbstor.GetSubKeyNames())
+                        list.Add(@"SYSTEM\CurrentControlSet\Enum\USBSTOR\" + name);
+                }
+            }
+            catch { }
+            return list;
+        }
+
         /// <summary>Xoá toàn bộ lịch sử USB từng cắm (ghost) trong USBSTOR.</summary>
         public static string ClearUsbStorHistory()
         {

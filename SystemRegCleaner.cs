@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Security.Principal;
 using System.Threading;
 using Microsoft.Win32;
 
@@ -131,17 +132,29 @@ namespace QuanLyHeThong
             var lines = new List<string>();
             try
             {
+                lines.Add("[SYSTEM] Tiến trình chạy bởi: " + WhoAmI());
                 string[] paths = File.ReadAllLines(payloadPath);
                 foreach (var raw in paths)
                 {
                     string sub = (raw ?? "").Trim();
                     if (sub.Length == 0) continue;
                     int i = sub.LastIndexOf('\\');
-                    if (i <= 0) { lines.Add("Bỏ qua (sai định dạng): " + sub); continue; }
+                    if (i <= 0) { lines.Add("[SYSTEM] Bỏ qua (sai định dạng): " + sub); continue; }
                     string parent = sub.Substring(0, i);
                     string leaf = sub.Substring(i + 1);
-                    bool ok = RegistryHelper.ForceDeleteSubKey(Registry.LocalMachine, parent, leaf);
-                    lines.Add((ok ? "[SYSTEM] Đã xoá: " : "[SYSTEM] Không xoá được: ") + sub);
+
+                    // Cách 1: chiếm quyền sở hữu rồi xoá (code)
+                    try { RegistryHelper.ForceDeleteSubKey(Registry.LocalMachine, parent, leaf); } catch { }
+
+                    // Cách 2 (dự phòng): dùng reg.exe delete nếu còn
+                    if (KeyExists(sub))
+                    {
+                        string ro;
+                        RunProc("reg.exe", "delete \"HKLM\\" + sub + "\" /f", out ro);
+                    }
+
+                    bool gone = !KeyExists(sub);
+                    lines.Add((gone ? "[SYSTEM] Đã xoá: " : "[SYSTEM] VẪN KHÔNG xoá được: ") + sub);
                 }
             }
             catch (Exception ex)
@@ -149,6 +162,44 @@ namespace QuanLyHeThong
                 lines.Add("[SYSTEM] Lỗi: " + ex.Message);
             }
             try { File.WriteAllLines(resultPath, lines); } catch { }
+        }
+
+        private static string WhoAmI()
+        {
+            try { return WindowsIdentity.GetCurrent().Name; } catch { return "(không xác định)"; }
+        }
+
+        private static bool KeyExists(string hklmSub)
+        {
+            try
+            {
+                using (var k = Registry.LocalMachine.OpenSubKey(hklmSub, false))
+                    return k != null;
+            }
+            catch { return true; } // mở lỗi do quyền => coi như còn
+        }
+
+        private static void RunProc(string file, string args, out string output)
+        {
+            output = "";
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = file,
+                    Arguments = args,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using (var p = Process.Start(psi))
+                {
+                    output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
+                    p.WaitForExit(10000);
+                }
+            }
+            catch (Exception ex) { output = ex.Message; }
         }
     }
 }

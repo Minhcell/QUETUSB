@@ -207,10 +207,17 @@ namespace QuanLyHeThong
             if (r != DialogResult.Yes) return;
 
             SetBusy(true, btnScanDev, btnDeleteDev, btnClearUsbHist);
+            Log(txtLog1, "Đang xoá lịch sử USBSTOR bằng quyền SYSTEM...");
             try
             {
-                string msg = await Task.Run(() => SystemScanner.ClearUsbStorHistory());
-                Log(txtLog1, msg);
+                await Task.Run(() =>
+                {
+                    var paths = SystemScanner.GetUsbStorSubPaths();
+                    if (paths.Count == 0) { Log(txtLog1, "Không có mục USBSTOR nào."); return; }
+                    // Thử xoá kiểu Administrator trước (nhanh), phần còn sót đẩy sang SYSTEM
+                    SystemScanner.ClearUsbStorHistory();
+                    Log(txtLog1, SystemRegCleaner.DeleteKeysAsSystem(paths, line => Log(txtLog1, line)));
+                });
             }
             finally { SetBusy(false, btnScanDev, btnDeleteDev, btnClearUsbHist); }
         }
