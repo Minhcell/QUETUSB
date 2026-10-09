@@ -18,6 +18,7 @@ namespace QuanLyHeThong
         public string ParentRel;     // vd VID_xxxx&PID_xxxx  (khoá cha dưới Enum\<root>)
         public string Service;       // dịch vụ driver (usbhub, hidusb, usbvideo...)
         public bool Protected;       // true = thiết bị hệ thống (hub/chuột/phím/camera...) — nên GIỮ, không xoá
+        public string FullKeyPath;   // đường dẫn khoá đầy đủ dưới HKLM (để xoá đúng mọi nhánh)
     }
 
     /// <summary>
@@ -35,7 +36,91 @@ namespace QuanLyHeThong
 
             ReadEnumBranch("USB", present, list, onlyVidPid: true);
             ReadEnumBranch("USBSTOR", present, list, onlyVidPid: false);
+            ReadStorageVolume(present, list);
+            ReadScsiUsb(present, list);
+
+            // Gán FullKeyPath cho các record dưới Enum
+            foreach (var rec in list)
+                if (string.IsNullOrEmpty(rec.FullKeyPath))
+                    rec.FullKeyPath = @"SYSTEM\CurrentControlSet\Enum\" + rec.InstanceId;
+
+            // Quét sâu các nhánh khác trong HKLM theo dấu vết serial USB (DeviceClasses...)
+            DeepScanReferences(present, list);
             return list;
+        }
+
+        /// <summary>
+        /// Quét sâu HKLM tìm dấu vết USB ở các nhánh ngoài Enum (Control\DeviceClasses,
+        /// Services\USBSTOR\Enum...). Bắt theo từ khoá USBSTOR / USB#VID_ trong tên khoá.
+        /// KHÔNG đụng DriverStore / gói driver.
+        /// </summary>
+        private static void DeepScanReferences(HashSet<string> present, List<UsbRecord> list)
+        {
+            // Tập serial của thiết bị ĐANG cắm (để đánh dấu present cho các tham chiếu)
+            var presentSerials = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var rec in list)
+                if (rec.Present && !string.IsNullOrEmpty(rec.Serial))
+                    presentSerials.Add(rec.Serial);
+
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var rec in list) seen.Add(rec.FullKeyPath);
+
+            // DeviceClasses: mỗi {InterfaceGUID}\##?#USBSTOR#... hoặc ##?#USB#VID_... là một tham chiếu thiết bị
+            try
+            {
+                string dcBase = @"SYSTEM\CurrentControlSet\Control\DeviceClasses";
+                using (var dc = Registry.LocalMachine.OpenSubKey(dcBase, false))
+                {
+                    if (dc != null)
+                    {
+                        foreach (var guid in dc.GetSubKeyNames())
+                        {
+                            using (var g = dc.OpenSubKey(guid, false))
+                            {
+                                if (g == null) continue;
+                                foreach (var symlink in g.GetSubKeyNames())
+                                {
+                                    string up = symlink.ToUpperInvariant();
+                                    bool isUsb = up.Contains("USBSTOR#") || up.Contains("#USB#VID_") || up.StartsWith("##?#USB#VID_");
+                                    if (!isUsb) continue;
+                                    string full = dcBase + "\\" + guid + "\\" + symlink;
+                                    if (!seen.Add(full)) continue;
+                                    bool pres = false;
+                                    foreach (var ser in presentSerials)
+                                        if (up.IndexOf(ser.ToUpperInvariant(), StringComparison.Ordinal) >= 0) { pres = true; break; }
+                                    list.Add(new UsbRecord
+                                    {
+                                        Type = "DeviceClass",
+                                        VidPid = "",
+                                        Serial = symlink,
+                                        InstanceId = "",
+                                        EnumRoot = "",
+                                        ParentRel = "",
+                                        Present = pres,
+                                        Description = "Tham chiếu DeviceClass: " + CleanSymlink(symlink),
+                                        Service = "",
+                                        Protected = false,
+                                        FullKeyPath = full
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private static string CleanSymlink(string s)
+        {
+            string t = s.Replace("##?#", "").Replace("_??_", "");
+            int cut = t.IndexOf('#');
+            if (cut > 0)
+            {
+                int c2 = t.IndexOf('#', cut + 1);
+                if (c2 > cut) t = t.Substring(0, c2);
+            }
+            return t.Replace("Disk&", "").Replace("&", " ").Replace("_", " ").Trim();
         }
 
         private static void ReadEnumBranch(string root, HashSet<string> present, List<UsbRecord> list, bool onlyVidPid)
@@ -83,6 +168,99 @@ namespace QuanLyHeThong
                 }
             }
             catch { }
+        }
+
+        /// <summary>Quét Enum\STORAGE\Volume — chỉ lấy volume của USB (tên chứa USBSTOR), bỏ ổ trong máy ({GUID}#...).</summary>
+        private static void ReadStorageVolume(HashSet<string> present, List<UsbRecord> list)
+        {
+            try
+            {
+                using (var branch = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Enum\STORAGE\Volume", false))
+                {
+                    if (branch == null) return;
+                    foreach (var name in branch.GetSubKeyNames())
+                    {
+                        // Chỉ volume của USB. Bỏ {GUID}#... (volume ổ cứng trong máy) để an toàn.
+                        if (name.IndexOf("USBSTOR", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                        string instanceId = @"STORAGE\Volume\" + name;
+                        list.Add(new UsbRecord
+                        {
+                            Type = "VOLUME",
+                            VidPid = "",
+                            Serial = name,
+                            InstanceId = instanceId,
+                            EnumRoot = "STORAGE",
+                            ParentRel = "Volume",
+                            Present = present.Contains(instanceId),
+                            Description = DescribeVolume(name),
+                            Service = "",
+                            Protected = false
+                        });
+                    }
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>Quét Enum\SCSI — một số USB/ổ ngoài hiện ở đây. Chỉ lấy mục của USB.</summary>
+        private static void ReadScsiUsb(HashSet<string> present, List<UsbRecord> list)
+        {
+            try
+            {
+                using (var branch = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Enum\SCSI", false))
+                {
+                    if (branch == null) return;
+                    foreach (var parentName in branch.GetSubKeyNames())
+                    {
+                        using (var parent = branch.OpenSubKey(parentName, false))
+                        {
+                            if (parent == null) continue;
+                            foreach (var serial in parent.GetSubKeyNames())
+                            {
+                                using (var dev = parent.OpenSubKey(serial, false))
+                                {
+                                    if (dev == null) continue;
+                                    // Chỉ lấy mục có dấu hiệu USB (thiết bị ngoài), bỏ ổ SATA/NVMe trong máy
+                                    string service = (dev.GetValue("Service") as string) ?? "";
+                                    string desc = (dev.GetValue("DeviceDesc") as string) ?? "";
+                                    string blob = (parentName + " " + desc).ToLowerInvariant();
+                                    bool looksUsb = blob.Contains("usb") || service.ToLowerInvariant() == "usbstor";
+                                    if (!looksUsb) continue;
+                                    string instanceId = @"SCSI\" + parentName + "\\" + serial;
+                                    list.Add(new UsbRecord
+                                    {
+                                        Type = "SCSI",
+                                        VidPid = "",
+                                        Serial = serial,
+                                        InstanceId = instanceId,
+                                        EnumRoot = "SCSI",
+                                        ParentRel = parentName,
+                                        Present = present.Contains(instanceId),
+                                        Description = Clean(string.IsNullOrEmpty(desc) ? parentName : desc),
+                                        Service = service,
+                                        Protected = false
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private static string DescribeVolume(string name)
+        {
+            // Tên dạng: _??_USBSTOR#Disk&Ven_USB&Prod__SanDisk_3.2Gen1&Rev_1.00#serial#{guid}
+            string s = name.Replace("_??_", "");
+            int firstHash = s.IndexOf('#');
+            if (firstHash >= 0)
+            {
+                int cut = s.IndexOf('#', firstHash + 1); // cắt trước phần serial/GUID
+                if (cut > firstHash) s = s.Substring(0, cut);
+            }
+            s = s.Replace("USBSTOR", "").Replace("Disk&", "").Replace("&", " ").Replace("_", " ").Trim();
+            return "USB Volume: " + s;
         }
 
         private static string BuildDesc(RegistryKey dev, string fallback)
@@ -150,21 +328,22 @@ namespace QuanLyHeThong
         {
             var paths = new List<string>();
 
-            // 1) Enum\USB + Enum\USBSTOR: chỉ lấy thiết bị cắm ngoài ĐÃ RÚT (lịch sử) và KHÔNG được bảo vệ.
-            //    Bỏ qua: thiết bị ĐANG CẮM (Windows tạo lại ngay, không xoá được), hub/chuột/phím/camera/bluetooth/card mạng/WiFi.
+            // Lấy TẤT CẢ dấu vết USB cắm ngoài ĐÃ RÚT (lịch sử), KHÔNG được bảo vệ — gồm cả
+            // DeviceClass, STORAGE\Volume, SCSI... (quét sâu). Bỏ thiết bị đang cắm, hub/chuột/phím/camera/WiFi.
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var rec in ScanAll())
-                if (!rec.Protected && !rec.Present)
-                    paths.Add(@"SYSTEM\CurrentControlSet\Enum\" + rec.InstanceId);
+                if (!rec.Protected && !rec.Present && !string.IsNullOrEmpty(rec.FullKeyPath))
+                    if (seen.Add(rec.FullKeyPath)) paths.Add(rec.FullKeyPath);
 
-            // 2) Các nơi khác chỉ chứa thiết bị cắm ngoài (điện thoại/MTP/thẻ nhớ) -> gom toàn bộ khoá con
-            AddAllSubKeys(paths, @"SYSTEM\CurrentControlSet\Enum\WpdBusEnumRoot");
-            AddAllSubKeys(paths, @"SYSTEM\CurrentControlSet\Enum\SWD\WPDBUSENUM");
-            AddAllSubKeys(paths, @"SOFTWARE\Microsoft\Windows Portable Devices\Devices");
+            // Các nơi chỉ chứa thiết bị cắm ngoài (điện thoại/MTP) -> gom toàn bộ khoá con
+            AddAllSubKeys(paths, seen, @"SYSTEM\CurrentControlSet\Enum\WpdBusEnumRoot");
+            AddAllSubKeys(paths, seen, @"SYSTEM\CurrentControlSet\Enum\SWD\WPDBUSENUM");
+            AddAllSubKeys(paths, seen, @"SOFTWARE\Microsoft\Windows Portable Devices\Devices");
 
             return paths;
         }
 
-        private static void AddAllSubKeys(List<string> paths, string basePath)
+        private static void AddAllSubKeys(List<string> paths, HashSet<string> seen, string basePath)
         {
             try
             {
@@ -172,45 +351,35 @@ namespace QuanLyHeThong
                 {
                     if (k == null) return;
                     foreach (var name in k.GetSubKeyNames())
-                        paths.Add(basePath + "\\" + name);
+                    {
+                        string full = basePath + "\\" + name;
+                        if (seen.Add(full)) paths.Add(full);
+                    }
                 }
             }
             catch { }
         }
 
-        /// <summary>Xoá một thiết bị: nếu đang cắm thì gỡ qua SetupAPI, rồi xoá dấu vết Registry.</summary>
+        /// <summary>Xoá một thiết bị/dấu vết: nếu là thiết bị đang cắm thì gỡ qua SetupAPI, rồi xoá khoá Registry theo FullKeyPath.</summary>
         public static string Remove(UsbRecord rec)
         {
             string msg;
-            if (rec.Present)
-            {
+            if (rec.Present && !string.IsNullOrEmpty(rec.InstanceId))
                 DeviceUninstaller.RemoveByInstanceId(rec.InstanceId, out msg);
-            }
             else
-            {
-                msg = "Thiết bị lịch sử (không cắm).";
-            }
+                msg = rec.Present ? "Đang cắm." : "Lịch sử (không cắm).";
 
-            string parentPath = @"SYSTEM\CurrentControlSet\Enum\" + rec.EnumRoot + "\\" + rec.ParentRel;
-            bool ok = RegistryHelper.ForceDeleteSubKey(Registry.LocalMachine, parentPath, rec.Serial);
-
-            // Nếu khoá cha hết thiết bị con thì xoá luôn cho sạch
-            try
+            bool ok = false;
+            string full = rec.FullKeyPath;
+            if (!string.IsNullOrEmpty(full))
             {
-                using (var parent = Registry.LocalMachine.OpenSubKey(parentPath, false))
-                {
-                    if (parent != null && parent.SubKeyCount == 0)
-                    {
-                        parent.Close();
-                        RegistryHelper.ForceDeleteSubKey(Registry.LocalMachine,
-                            @"SYSTEM\CurrentControlSet\Enum\" + rec.EnumRoot, rec.ParentRel);
-                    }
-                }
+                int i = full.LastIndexOf('\\');
+                if (i > 0)
+                    ok = RegistryHelper.ForceDeleteSubKey(Registry.LocalMachine, full.Substring(0, i), full.Substring(i + 1));
             }
-            catch { }
 
             return "[" + rec.Type + "] " + rec.Description + " (" + rec.Serial + "): " + msg +
-                   (ok ? "  | Đã xoá Registry." : "  | Registry: không xoá được / đã sạch.");
+                   (ok ? "  | Đã xoá Registry." : "  | Registry: chưa xoá được (sẽ xử lý bằng SYSTEM).");
         }
     }
 }

@@ -362,11 +362,11 @@ namespace QuanLyHeThong
                     foreach (var rec in chosen)
                         Log(txtLog4, UsbHistoryScanner.Remove(rec));
 
-                    // Xoá triệt để bằng quyền SYSTEM cho các khoá Enum còn sót
+                    // Xoá triệt để bằng quyền SYSTEM cho các khoá còn sót (mọi nhánh)
                     var subPaths = new List<string>();
                     foreach (var rec in chosen)
-                        if (!string.IsNullOrEmpty(rec.InstanceId))
-                            subPaths.Add(@"SYSTEM\CurrentControlSet\Enum\" + rec.InstanceId);
+                        if (!string.IsNullOrEmpty(rec.FullKeyPath))
+                            subPaths.Add(rec.FullKeyPath);
                     if (subPaths.Count > 0)
                         Log(txtLog4, SystemRegCleaner.DeleteKeysAsSystem(subPaths, line => Log(txtLog4, line)));
                 });
