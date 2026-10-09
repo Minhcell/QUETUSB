@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Security.Principal;
+using System.Text;
 using System.Threading;
 using Microsoft.Win32;
 
@@ -31,24 +32,35 @@ namespace QuanLyHeThong
 
             string tmp = Path.GetTempPath();
             string id = Guid.NewGuid().ToString("N");
-            string payload = Path.Combine(tmp, "qlht_payload_" + id + ".txt");
+            string regFile = Path.Combine(tmp, "qlht_del_" + id + ".reg");
             string result = Path.Combine(tmp, "qlht_result_" + id + ".txt");
             string wrapper = Path.Combine(tmp, "qlht_run_" + id + ".cmd");
             string taskName = "QLHT_SysDel_" + id.Substring(0, 8);
-            string exe = Process.GetCurrentProcess().MainModule.FileName;
 
             try
             {
-                File.WriteAllLines(payload, hklmSubPaths);
                 if (File.Exists(result)) File.Delete(result);
 
-                // File .cmd bọc ngoài để tránh rắc rối dấu ngoặc của schtasks
-                File.WriteAllText(wrapper,
-                    "@echo off\r\n\"" + exe + "\" " + SysArg + " \"" + payload + "\" \"" + result + "\"\r\n");
+                // 1) File .reg xoá TẤT CẢ khoá trong 1 lần (dòng [-HKLM\...] = xoá khoá đó + con)
+                var reg = new StringBuilder();
+                reg.AppendLine("Windows Registry Editor Version 5.00");
+                reg.AppendLine();
+                foreach (var p in hklmSubPaths)
+                    reg.AppendLine("[-HKEY_LOCAL_MACHINE\\" + p + "]");
+                File.WriteAllText(regFile, reg.ToString(), Encoding.Unicode); // .reg chuẩn UTF-16
 
-                log("Tạo tác vụ SYSTEM để xoá " + hklmSubPaths.Count + " khoá Registry...");
+                // 2) File .cmd chạy dưới SYSTEM: whoami + reg import (chỉ 1 tiến trình reg.exe)
+                var sb = new StringBuilder();
+                sb.AppendLine("@echo off");
+                sb.AppendLine("echo ===QLHT_WHOAMI=== > \"" + result + "\"");
+                sb.AppendLine("whoami >> \"" + result + "\" 2>&1");
+                sb.AppendLine("echo ===QLHT_IMPORT=== >> \"" + result + "\"");
+                sb.AppendLine("reg import \"" + regFile + "\" >> \"" + result + "\" 2>&1");
+                sb.AppendLine("echo ===QLHT_DONE=== >> \"" + result + "\"");
+                File.WriteAllText(wrapper, sb.ToString(), Encoding.Default);
 
-                // Tạo tác vụ chạy dưới SYSTEM
+                log("Tạo tác vụ SYSTEM để xoá " + hklmSubPaths.Count + " khoá Registry (gộp 1 lần)...");
+
                 string createArgs = "/Create /TN \"" + taskName + "\" /TR \"\\\"" + wrapper +
                                     "\\\"\" /SC ONCE /ST 23:59 /RU SYSTEM /RL HIGHEST /F";
                 string cOut;
@@ -56,29 +68,38 @@ namespace QuanLyHeThong
                 if (cExit != 0)
                     return "Không tạo được tác vụ SYSTEM (schtasks mã " + cExit + "). " + FirstLine(cOut);
 
-                // Chạy ngay
                 string dummy;
                 Run("schtasks.exe", "/Run /TN \"" + taskName + "\"", out dummy);
 
-                // Chờ file kết quả (tối đa ~30 giây)
+                // Chờ dấu kết thúc (tối đa ~60 giây)
                 bool done = false;
-                for (int i = 0; i < 100; i++)
+                for (int i = 0; i < 200; i++)
                 {
-                    if (File.Exists(result)) { Thread.Sleep(300); done = true; break; }
                     Thread.Sleep(300);
+                    if (File.Exists(result) && SafeRead(result).Contains("===QLHT_DONE===")) { done = true; break; }
                 }
 
-                if (done)
-                {
-                    try
-                    {
-                        foreach (var line in File.ReadAllLines(result))
-                            if (!string.IsNullOrWhiteSpace(line)) log(line);
-                    }
-                    catch { }
-                    return "Đã xoá Registry bằng quyền SYSTEM xong.";
-                }
-                return "Hết thời gian chờ tác vụ SYSTEM (có thể bị chặn bởi phần mềm bảo mật).";
+                // LUÔN hiện nội dung file kết quả (kể cả khi hết giờ) để chẩn đoán
+                string txt = SafeRead(result);
+                if (string.IsNullOrWhiteSpace(txt))
+                    log("  (Tác vụ SYSTEM KHÔNG tạo ra kết quả — nhiều khả năng bị phần mềm bảo mật chặn.)");
+                else
+                    foreach (var line in txt.Split('\n'))
+                        if (!string.IsNullOrWhiteSpace(line)) log("  " + line.Trim());
+
+                // Tự kiểm tra lại: còn khoá nào chưa xoá?
+                int remain = 0;
+                var sample = new List<string>();
+                foreach (var p in hklmSubPaths)
+                    if (KeyExists(p)) { remain++; if (sample.Count < 5) sample.Add(p); }
+
+                if (remain == 0)
+                    return "✔ Đã xoá sạch toàn bộ " + hklmSubPaths.Count + " khoá bằng quyền SYSTEM.";
+
+                string msg = "Còn " + remain + "/" + hklmSubPaths.Count + " khoá CHƯA xoá được.";
+                if (!done) msg += " (Tác vụ SYSTEM hết giờ hoặc bị chặn.)";
+                foreach (var s in sample) log("  → còn: " + s);
+                return msg;
             }
             catch (Exception ex)
             {
@@ -87,7 +108,7 @@ namespace QuanLyHeThong
             finally
             {
                 try { string d2; Run("schtasks.exe", "/Delete /TN \"" + taskName + "\" /F", out d2); } catch { }
-                try { if (File.Exists(payload)) File.Delete(payload); } catch { }
+                try { if (File.Exists(regFile)) File.Delete(regFile); } catch { }
                 try { if (File.Exists(result)) File.Delete(result); } catch { }
                 try { if (File.Exists(wrapper)) File.Delete(wrapper); } catch { }
             }
@@ -115,6 +136,17 @@ namespace QuanLyHeThong
                 }
             }
             catch (Exception ex) { output = ex.Message; return -1; }
+        }
+
+        private static string SafeRead(string path)
+        {
+            try
+            {
+                using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var sr = new StreamReader(fs))
+                    return sr.ReadToEnd();
+            }
+            catch { return ""; }
         }
 
         private static string FirstLine(string s)
