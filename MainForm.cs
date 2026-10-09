@@ -181,6 +181,17 @@ namespace QuanLyHeThong
                 {
                     foreach (var it in chosen)
                         Log(txtLog1, SystemScanner.Remove(it, cleanReg));
+
+                    if (cleanReg)
+                    {
+                        // Xoá triệt để bằng quyền SYSTEM cho các khoá Enum còn sót (USB / card)
+                        var subPaths = new List<string>();
+                        foreach (var it in chosen)
+                            if (!string.IsNullOrEmpty(it.InstanceId))
+                                subPaths.Add(@"SYSTEM\CurrentControlSet\Enum\" + it.InstanceId);
+                        if (subPaths.Count > 0)
+                            Log(txtLog1, SystemRegCleaner.DeleteKeysAsSystem(subPaths, line => Log(txtLog1, line)));
+                    }
                 });
                 Log(txtLog1, "Hoàn tất. Nên bấm 'Quét phát hiện' lại để cập nhật danh sách.");
             }
@@ -320,6 +331,14 @@ namespace QuanLyHeThong
                 {
                     foreach (var rec in chosen)
                         Log(txtLog4, UsbHistoryScanner.Remove(rec));
+
+                    // Xoá triệt để bằng quyền SYSTEM cho các khoá Enum còn sót
+                    var subPaths = new List<string>();
+                    foreach (var rec in chosen)
+                        if (!string.IsNullOrEmpty(rec.InstanceId))
+                            subPaths.Add(@"SYSTEM\CurrentControlSet\Enum\" + rec.InstanceId);
+                    if (subPaths.Count > 0)
+                        Log(txtLog4, SystemRegCleaner.DeleteKeysAsSystem(subPaths, line => Log(txtLog4, line)));
                 });
                 Log(txtLog4, "Hoàn tất. Nên quét lại để cập nhật danh sách.");
             }
