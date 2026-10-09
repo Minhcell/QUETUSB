@@ -33,15 +33,12 @@ namespace QuanLyHeThong
             string tmp = Path.GetTempPath();
             string id = Guid.NewGuid().ToString("N");
             string regFile = Path.Combine(tmp, "qlht_del_" + id + ".reg");
-            string result = Path.Combine(tmp, "qlht_result_" + id + ".txt");
-            string wrapper = Path.Combine(tmp, "qlht_run_" + id + ".cmd");
             string taskName = "QLHT_SysDel_" + id.Substring(0, 8);
+            bool usedTask = false;
 
             try
             {
-                if (File.Exists(result)) File.Delete(result);
-
-                // 1) File .reg xoá TẤT CẢ khoá trong 1 lần (dòng [-HKLM\...] = xoá khoá đó + con)
+                // File .reg xoá TẤT CẢ khoá trong 1 lần (dòng [-HKLM\...] = xoá khoá đó + con)
                 var reg = new StringBuilder();
                 reg.AppendLine("Windows Registry Editor Version 5.00");
                 reg.AppendLine();
@@ -49,43 +46,40 @@ namespace QuanLyHeThong
                     reg.AppendLine("[-HKEY_LOCAL_MACHINE\\" + p + "]");
                 File.WriteAllText(regFile, reg.ToString(), Encoding.Unicode); // .reg chuẩn UTF-16
 
-                // 2) File .cmd chạy dưới SYSTEM: whoami + reg import (chỉ 1 tiến trình reg.exe)
-                var sb = new StringBuilder();
-                sb.AppendLine("@echo off");
-                sb.AppendLine("echo ===QLHT_WHOAMI=== > \"" + result + "\"");
-                sb.AppendLine("whoami >> \"" + result + "\" 2>&1");
-                sb.AppendLine("echo ===QLHT_IMPORT=== >> \"" + result + "\"");
-                sb.AppendLine("reg import \"" + regFile + "\" >> \"" + result + "\" 2>&1");
-                sb.AppendLine("echo ===QLHT_DONE=== >> \"" + result + "\"");
-                File.WriteAllText(wrapper, sb.ToString(), Encoding.Default);
-
-                log("Tạo tác vụ SYSTEM để xoá " + hklmSubPaths.Count + " khoá Registry (gộp 1 lần)...");
-
-                string createArgs = "/Create /TN \"" + taskName + "\" /TR \"\\\"" + wrapper +
-                                    "\\\"\" /SC ONCE /ST 23:59 /RU SYSTEM /RL HIGHEST /F";
-                string cOut;
-                int cExit = Run("schtasks.exe", createArgs, out cOut);
-                if (cExit != 0)
-                    return "Không tạo được tác vụ SYSTEM (schtasks mã " + cExit + "). " + FirstLine(cOut);
-
-                string dummy;
-                Run("schtasks.exe", "/Run /TN \"" + taskName + "\"", out dummy);
-
-                // Chờ dấu kết thúc (tối đa ~60 giây)
-                bool done = false;
-                for (int i = 0; i < 200; i++)
+                string psexec = FindPsExec();
+                if (psexec != null)
                 {
-                    Thread.Sleep(300);
-                    if (File.Exists(result) && SafeRead(result).Contains("===QLHT_DONE===")) { done = true; break; }
-                }
-
-                // LUÔN hiện nội dung file kết quả (kể cả khi hết giờ) để chẩn đoán
-                string txt = SafeRead(result);
-                if (string.IsNullOrWhiteSpace(txt))
-                    log("  (Tác vụ SYSTEM KHÔNG tạo ra kết quả — nhiều khả năng bị phần mềm bảo mật chặn.)");
-                else
-                    foreach (var line in txt.Split('\n'))
+                    // Ưu tiên PsExec (đã xác nhận chạy được). reg.exe nằm System32 nên không vướng chặn script Temp.
+                    log("Dùng PsExec chạy reg import dưới SYSTEM: " + psexec);
+                    string po;
+                    Run(psexec, "-accepteula -nobanner -s reg import \"" + regFile + "\"", out po);
+                    foreach (var line in (po ?? "").Split('\n'))
                         if (!string.IsNullOrWhiteSpace(line)) log("  " + line.Trim());
+                }
+                else
+                {
+                    // Không có PsExec: tạo tác vụ SYSTEM gọi THẲNG reg.exe (System32), KHÔNG chạy script từ Temp.
+                    usedTask = true;
+                    log("Tạo tác vụ SYSTEM gọi reg import để xoá " + hklmSubPaths.Count + " khoá...");
+                    string createArgs = "/Create /TN \"" + taskName + "\" /TR \"reg import \\\"" + regFile +
+                                        "\\\"\" /SC ONCE /ST 23:59 /RU SYSTEM /RL HIGHEST /F";
+                    string cOut;
+                    int cExit = Run("schtasks.exe", createArgs, out cOut);
+                    if (cExit != 0)
+                        return "Không tạo được tác vụ SYSTEM (schtasks mã " + cExit + "). " + FirstLine(cOut);
+
+                    string dummy;
+                    Run("schtasks.exe", "/Run /TN \"" + taskName + "\"", out dummy);
+
+                    // Chờ: hễ khoá đầu tiên biến mất là coi như đang chạy (tối đa ~30 giây)
+                    string firstKey = hklmSubPaths[0];
+                    for (int i = 0; i < 60; i++)
+                    {
+                        Thread.Sleep(500);
+                        if (!KeyExists(firstKey)) break;
+                    }
+                    Thread.Sleep(1500);
+                }
 
                 // Tự kiểm tra lại: còn khoá nào chưa xoá?
                 int remain = 0;
@@ -96,9 +90,12 @@ namespace QuanLyHeThong
                 if (remain == 0)
                     return "✔ Đã xoá sạch toàn bộ " + hklmSubPaths.Count + " khoá bằng quyền SYSTEM.";
 
-                string msg = "Còn " + remain + "/" + hklmSubPaths.Count + " khoá CHƯA xoá được.";
-                if (!done) msg += " (Tác vụ SYSTEM hết giờ hoặc bị chặn.)";
                 foreach (var s in sample) log("  → còn: " + s);
+                string msg = "Còn " + remain + "/" + hklmSubPaths.Count + " khoá CHƯA xoá được.";
+                if (psexec == null)
+                    msg += " GỢI Ý: chép PsExec.exe vào CÙNG THƯ MỤC với app rồi thử lại — máy này có thể chặn tác vụ SYSTEM, còn PsExec bạn đã xác nhận chạy được.";
+                else
+                    msg += " PsExec cũng không xoá được → khoá do TrustedInstaller sở hữu sâu hơn SYSTEM.";
                 return msg;
             }
             catch (Exception ex)
@@ -107,11 +104,31 @@ namespace QuanLyHeThong
             }
             finally
             {
-                try { string d2; Run("schtasks.exe", "/Delete /TN \"" + taskName + "\" /F", out d2); } catch { }
+                if (usedTask) { try { string d2; Run("schtasks.exe", "/Delete /TN \"" + taskName + "\" /F", out d2); } catch { } }
                 try { if (File.Exists(regFile)) File.Delete(regFile); } catch { }
-                try { if (File.Exists(result)) File.Delete(result); } catch { }
-                try { if (File.Exists(wrapper)) File.Delete(wrapper); } catch { }
             }
+        }
+
+        /// <summary>Tìm PsExec do người dùng để sẵn (cùng thư mục app hoặc System32). Không kèm sẵn vì giấy phép Microsoft.</summary>
+        private static string FindPsExec()
+        {
+            try
+            {
+                string dir = Path.GetDirectoryName(Process.GetCurrentProcess().MainModule.FileName);
+                string sys = Environment.GetFolderPath(Environment.SpecialFolder.System);
+                string[] names = { "PsExec64.exe", "PsExec.exe", "psexec.exe" };
+                foreach (var baseDir in new[] { dir, sys })
+                {
+                    if (string.IsNullOrEmpty(baseDir)) continue;
+                    foreach (var n in names)
+                    {
+                        string full = Path.Combine(baseDir, n);
+                        if (File.Exists(full)) return full;
+                    }
+                }
+            }
+            catch { }
+            return null;
         }
 
         private static int Run(string file, string args, out string output)
