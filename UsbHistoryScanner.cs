@@ -19,6 +19,7 @@ namespace QuanLyHeThong
         public string Service;       // dịch vụ driver (usbhub, hidusb, usbvideo...)
         public bool Protected;       // true = thiết bị hệ thống (hub/chuột/phím/camera...) — nên GIỮ, không xoá
         public string FullKeyPath;   // đường dẫn khoá đầy đủ dưới HKLM (để xoá đúng mọi nhánh)
+        public string TimeInfo;      // thời gian cắm gần nhất / cài đặt (nếu đọc được)
     }
 
     /// <summary>
@@ -158,7 +159,8 @@ namespace QuanLyHeThong
                                         Present = present.Contains(instanceId),
                                         Description = BuildDesc(dev, parentName),
                                         Service = service,
-                                        Protected = IsSystemDevice(service, parentName) || IsNetClass(classGuid)
+                                        Protected = IsSystemDevice(service, parentName) || IsNetClass(classGuid),
+                                        TimeInfo = ReadDeviceTime(dev)
                                     };
                                     list.Add(rec);
                                 }
@@ -261,6 +263,37 @@ namespace QuanLyHeThong
             }
             s = s.Replace("USBSTOR", "").Replace("Disk&", "").Replace("&", " ").Replace("_", " ").Trim();
             return "USB Volume: " + s;
+        }
+
+        /// <summary>Đọc thời gian cắm gần nhất / cài đặt của thiết bị từ Properties (best-effort; nhiều khoá bị khoá quyền nên có thể trống).</summary>
+        private static string ReadDeviceTime(RegistryKey dev)
+        {
+            // {83da6326-...}: 0066=LastArrival, 0067=LastRemoval, 0064=InstallDate, 0065=FirstInstall
+            string[] idx = { "0066", "0064", "0065" };
+            foreach (var id in idx)
+            {
+                try
+                {
+                    using (var k = dev.OpenSubKey(@"Properties\{83da6326-97a6-4088-9453-a1923f573b29}\" + id, false))
+                    {
+                        if (k == null) continue;
+                        object v = k.GetValue(null);
+                        if (!(v is byte[]))
+                            foreach (var vn in k.GetValueNames()) { v = k.GetValue(vn); if (v is byte[]) break; }
+                        var b = v as byte[];
+                        if (b != null && b.Length >= 8)
+                        {
+                            long ft = BitConverter.ToInt64(b, 0);
+                            if (ft > 0)
+                            {
+                                try { return DateTime.FromFileTime(ft).ToString("yyyy-MM-dd HH:mm"); } catch { }
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+            return "";
         }
 
         private static string BuildDesc(RegistryKey dev, string fallback)

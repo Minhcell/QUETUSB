@@ -77,12 +77,16 @@ namespace QuanLyHeThong
                         string prov = (o["DriverProviderName"] as string) ?? "";
                         string ver = (o["DriverVersion"] as string) ?? "";
                         string cls = (o["DeviceClass"] as string) ?? "";
-                        // Chỉ lấy driver Wi-Fi (không dây), bỏ qua driver khác
-                        if (!IsWifi(dev + " " + prov + " " + cls)) continue;
+                        string blob = dev + " " + prov + " " + cls;
+                        bool wifi = IsWifi(blob);
+                        bool usb = IsUsbDriver(cls, blob);
+                        // Chỉ lấy driver USB hoặc WiFi
+                        if (!wifi && !usb) continue;
+                        string tag = wifi ? "(Wi-Fi) " : "(USB) ";
                         list.Add(new SysItem
                         {
                             Kind = ItemKind.Driver,
-                            Name = "(Wi-Fi) " + inf + "  —  " + (string.IsNullOrEmpty(dev) ? cls : dev),
+                            Name = tag + inf + "  —  " + (string.IsNullOrEmpty(dev) ? cls : dev),
                             Detail = (string.IsNullOrEmpty(prov) ? "" : "NSX: " + prov) +
                                      (string.IsNullOrEmpty(ver) ? "" : "  |  v" + ver),
                             Status = "",
@@ -140,6 +144,15 @@ namespace QuanLyHeThong
             string t = text.ToLowerInvariant();
             return t.Contains("wi-fi") || t.Contains("wifi") || t.Contains("wireless")
                 || t.Contains("802.11") || t.Contains("wlan") || t.Contains("dual band");
+        }
+
+        /// <summary>Nhận diện driver USB theo lớp thiết bị / từ khoá.</summary>
+        private static bool IsUsbDriver(string deviceClass, string text)
+        {
+            string c = (deviceClass ?? "").ToLowerInvariant();
+            if (c == "usb" || c == "usbdevice") return true;
+            string t = (text ?? "").ToLowerInvariant();
+            return t.Contains("usb");
         }
 
         // ====== XOÁ (chỉ chạy khi người dùng bấm nút, với các mục đã tích chọn) ======

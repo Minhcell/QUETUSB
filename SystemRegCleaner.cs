@@ -118,6 +118,18 @@ namespace QuanLyHeThong
                     Thread.Sleep(1500);
                 }
 
+                // ===== BƯỚC 3: LƯỢT ADMINISTRATOR CUỐI (sau khi PsExec có thể đã chiếm quyền sở hữu) =====
+                foreach (var p in remaining)
+                {
+                    if (!KeyExists(p)) continue;
+                    int i = p.LastIndexOf('\\');
+                    if (i > 0)
+                    {
+                        try { RegistryHelper.ForceDeleteSubKey(Registry.LocalMachine, p.Substring(0, i), p.Substring(i + 1)); }
+                        catch { }
+                    }
+                }
+
                 // Tự kiểm tra lại: còn khoá nào chưa xoá?
                 int remain = 0;
                 var sample = new List<string>();
@@ -125,7 +137,7 @@ namespace QuanLyHeThong
                     if (KeyExists(p)) { remain++; if (sample.Count < 5) sample.Add(p); }
 
                 if (remain == 0)
-                    return "✔ Đã xoá sạch toàn bộ " + hklmSubPaths.Count + " khoá bằng quyền SYSTEM.";
+                    return "✔ Đã xoá sạch toàn bộ " + hklmSubPaths.Count + " khoá (Administrator + SYSTEM).";
 
                 foreach (var s in sample) log("  → còn: " + s);
                 string msg = "Còn " + remain + "/" + hklmSubPaths.Count + " khoá CHƯA xoá được.";

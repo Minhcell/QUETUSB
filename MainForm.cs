@@ -47,6 +47,12 @@ namespace QuanLyHeThong
             Font = new Font("Segoe UI", 9f);
 
             var tabs = new TabControl { Dock = DockStyle.Fill };
+            // Vẽ tab kiểu 3D, tab đang chọn nổi màu để dễ nhận biết
+            tabs.SizeMode = TabSizeMode.Fixed;
+            tabs.Multiline = true;
+            tabs.ItemSize = new Size(178, 34);
+            tabs.DrawMode = TabDrawMode.OwnerDrawFixed;
+            tabs.DrawItem += TabsDrawItem;
             tabs.TabPages.Add(BuildTabDevices());
             tabs.TabPages.Add(BuildTabUsbHistory());
             tabs.TabPages.Add(BuildTabJunk());
@@ -99,7 +105,7 @@ namespace QuanLyHeThong
             lvDevices.Columns.Add("Chi tiết", 300);
             lvDevices.Columns.Add("Trạng thái", 90);
             lvDevices.Groups.Add(new ListViewGroup("usb", "USB cắm ngoài"));
-            lvDevices.Groups.Add(new ListViewGroup("driver", "Driver Wi-Fi"));
+            lvDevices.Groups.Add(new ListViewGroup("driver", "Driver USB & Wi-Fi"));
             lvDevices.Groups.Add(new ListViewGroup("nic", "Card Wi-Fi"));
 
             var mid = new Panel { Dock = DockStyle.Top, Height = 44, Padding = new Padding(8, 6, 8, 6) };
@@ -252,6 +258,7 @@ namespace QuanLyHeThong
             lvUsbHist.Columns.Add("Số seri / Instance", 220);
             lvUsbHist.Columns.Add("Loại", 80);
             lvUsbHist.Columns.Add("Hiện diện", 90);
+            lvUsbHist.Columns.Add("Thời gian cắm", 130);
             lvUsbHist.Columns.Add("Phân loại", 150);
 
             var mid = new Panel { Dock = DockStyle.Top, Height = 44, Padding = new Padding(8, 6, 8, 6) };
@@ -308,10 +315,15 @@ namespace QuanLyHeThong
                 lvi.SubItems.Add(r.VidPid);
                 lvi.SubItems.Add(r.Serial);
                 lvi.SubItems.Add(r.Type);
-                lvi.SubItems.Add(r.Present ? "Đang cắm" : "Lịch sử");
+                lvi.SubItems.Add(r.Present ? "● Đang cắm" : "Lịch sử");
+                lvi.SubItems.Add(string.IsNullOrEmpty(r.TimeInfo) ? "—" : r.TimeInfo);
                 lvi.SubItems.Add(r.Protected ? "⚠ Hệ thống (giữ)" : "Cắm ngoài");
                 lvi.Tag = r;
-                if (r.Protected) lvi.ForeColor = System.Drawing.Color.Gray;
+                if (r.Present)
+                    lvi.BackColor = System.Drawing.Color.FromArgb(220, 245, 220); // xanh lá nhạt = đang hoạt động
+                else
+                    lvi.ForeColor = System.Drawing.Color.Gray;                    // lịch sử = xám nhạt
+                if (r.Protected) lvi.ForeColor = System.Drawing.Color.DarkGray;
                 lvUsbHist.Items.Add(lvi);
             }
             lvUsbHist.EndUpdate();
@@ -328,21 +340,22 @@ namespace QuanLyHeThong
         {
             var chosen = new List<UsbRecord>();
             int skipped = 0;
+            // Lấy các mục được TICK hoặc được BÔI ĐEN (kéo chuột chọn vùng)
             foreach (ListViewItem lvi in lvUsbHist.Items)
-                if (lvi.Checked && lvi.Tag is UsbRecord)
-                {
-                    var rec = (UsbRecord)lvi.Tag;
-                    // Bảo vệ thiết bị hệ thống: bỏ qua khi ô bảo vệ đang bật
-                    if (chkProtectSystem.Checked && rec.Protected) { skipped++; continue; }
-                    chosen.Add(rec);
-                }
+            {
+                if (!(lvi.Tag is UsbRecord)) continue;
+                if (!lvi.Checked && !lvi.Selected) continue;
+                var rec = (UsbRecord)lvi.Tag;
+                if (chkProtectSystem.Checked && rec.Protected) { skipped++; continue; }
+                chosen.Add(rec);
+            }
 
             if (chosen.Count == 0)
             {
                 MessageBox.Show(skipped > 0
                     ? "Các mục đã chọn đều là thiết bị hệ thống (hub/chuột/phím/camera) đang được bảo vệ nên không xoá. " +
                       "Nếu thực sự muốn xoá, bỏ tích ô 'Bảo vệ thiết bị hệ thống'."
-                    : "Chưa chọn mục nào.");
+                    : "Chưa chọn mục nào. Hãy TICK ô vuông, hoặc KÉO CHUỘT bôi đen các dòng cần xoá.");
                 return;
             }
 
@@ -751,6 +764,22 @@ namespace QuanLyHeThong
         // ============================================================
         // Tiện ích chung
         // ============================================================
+        // Vẽ tab: tab đang chọn nổi 3D màu xanh, tab khác phẳng xám
+        private void TabsDrawItem(object sender, DrawItemEventArgs e)
+        {
+            var tc = (TabControl)sender;
+            var r = tc.GetTabRect(e.Index);
+            bool selected = (e.Index == tc.SelectedIndex);
+            Color back = selected ? Color.FromArgb(33, 118, 255) : Color.FromArgb(226, 229, 236);
+            Color fore = selected ? Color.White : Color.FromArgb(50, 50, 50);
+            using (var b = new SolidBrush(back)) e.Graphics.FillRectangle(b, r);
+            ControlPaint.DrawBorder3D(e.Graphics, r,
+                selected ? Border3DStyle.RaisedInner : Border3DStyle.SunkenOuter);
+            var text = tc.TabPages[e.Index].Text;
+            TextRenderer.DrawText(e.Graphics, text, tc.Font, r, fore,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
+
         private static bool IsAdmin()
         {
             try
