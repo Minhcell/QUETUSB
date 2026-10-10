@@ -41,22 +41,28 @@ namespace QuanLyHeThong
 
             try
             {
-                // ===== BƯỚC 1: XOÁ BẰNG QUYỀN ADMINISTRATOR (giống xoá tay trong regedit) =====
-                // Nhiều khoá Enum\USB xoá được ngay bằng Administrator, KHÔNG cần SYSTEM.
+                // ===== BƯỚC 1: XOÁ BẰNG reg.exe (giống hệt xoá tay trong regedit) =====
+                // reg.exe là công cụ gốc của Windows — xoá được thì y như regedit, tránh sai lệch của .NET.
                 int adminOk = 0;
                 var remaining = new List<string>();
                 foreach (var p in hklmSubPaths)
                 {
-                    int i = p.LastIndexOf('\\');
-                    if (i > 0)
+                    string o;
+                    Run("reg.exe", "delete \"HKLM\\" + p + "\" /f", out o);
+                    // còn thì thử thêm cách .NET chiếm quyền sở hữu
+                    if (RegExists(p))
                     {
-                        try { RegistryHelper.ForceDeleteSubKey(Registry.LocalMachine, p.Substring(0, i), p.Substring(i + 1)); }
-                        catch { }
+                        int i = p.LastIndexOf('\\');
+                        if (i > 0)
+                        {
+                            try { RegistryHelper.ForceDeleteSubKey(Registry.LocalMachine, p.Substring(0, i), p.Substring(i + 1)); }
+                            catch { }
+                        }
                     }
-                    if (!KeyExists(p)) adminOk++;
+                    if (!RegExists(p)) adminOk++;
                     else remaining.Add(p);
                 }
-                log("Xoá bằng Administrator: " + adminOk + "/" + hklmSubPaths.Count + " khoá.");
+                log("Xoá bằng Administrator (reg.exe): " + adminOk + "/" + hklmSubPaths.Count + " khoá.");
 
                 if (remaining.Count == 0)
                     return "✔ Đã xoá sạch toàn bộ " + hklmSubPaths.Count + " khoá (bằng Administrator).";
@@ -118,33 +124,59 @@ namespace QuanLyHeThong
                     Thread.Sleep(1500);
                 }
 
-                // ===== BƯỚC 3: LƯỢT ADMINISTRATOR CUỐI (sau khi PsExec có thể đã chiếm quyền sở hữu) =====
+                // ===== BƯỚC 3: LƯỢT CUỐI reg.exe + .NET (sau khi PsExec có thể đã chiếm quyền sở hữu) =====
                 foreach (var p in remaining)
                 {
-                    if (!KeyExists(p)) continue;
-                    int i = p.LastIndexOf('\\');
-                    if (i > 0)
+                    if (!RegExists(p)) continue;
+                    string o;
+                    Run("reg.exe", "delete \"HKLM\\" + p + "\" /f", out o);
+                    if (RegExists(p))
                     {
-                        try { RegistryHelper.ForceDeleteSubKey(Registry.LocalMachine, p.Substring(0, i), p.Substring(i + 1)); }
-                        catch { }
+                        int i = p.LastIndexOf('\\');
+                        if (i > 0)
+                        {
+                            try { RegistryHelper.ForceDeleteSubKey(Registry.LocalMachine, p.Substring(0, i), p.Substring(i + 1)); }
+                            catch { }
+                        }
                     }
                 }
 
-                // Tự kiểm tra lại: còn khoá nào chưa xoá?
-                int remain = 0;
+                // Chờ 2 giây để phát hiện khoá bị Windows TẠO LẠI (thiết bị đang hiện diện)
+                Thread.Sleep(2000);
+
+                // Tập thiết bị đang hiện diện (để giải thích vì sao khoá quay lại)
+                HashSet<string> present2;
+                try { present2 = DeviceUninstaller.GetPresentInstanceIds(); }
+                catch { present2 = new HashSet<string>(StringComparer.OrdinalIgnoreCase); }
+
+                int remain = 0, recreated = 0;
                 var sample = new List<string>();
                 foreach (var p in hklmSubPaths)
-                    if (KeyExists(p)) { remain++; if (sample.Count < 5) sample.Add(p); }
+                {
+                    if (!RegExists(p)) continue;
+                    remain++;
+                    // instanceId = phần sau "...\Enum\"
+                    string marker = @"CurrentControlSet\Enum\";
+                    string inst = p;
+                    int mi = p.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+                    if (mi >= 0) inst = p.Substring(mi + marker.Length);
+                    bool isPresent = present2.Contains(inst);
+                    if (isPresent) recreated++;
+                    if (sample.Count < 6) sample.Add((isPresent ? "[ĐANG HOẠT ĐỘNG] " : "[cứng đầu] ") + p);
+                }
 
                 if (remain == 0)
                     return "✔ Đã xoá sạch toàn bộ " + hklmSubPaths.Count + " khoá (Administrator + SYSTEM).";
 
                 foreach (var s in sample) log("  → còn: " + s);
-                string msg = "Còn " + remain + "/" + hklmSubPaths.Count + " khoá CHƯA xoá được.";
-                if (psexec == null)
-                    msg += " GỢI Ý: chép PsExec.exe vào CÙNG THƯ MỤC với app rồi thử lại — máy này có thể chặn tác vụ SYSTEM, còn PsExec bạn đã xác nhận chạy được.";
-                else
-                    msg += " PsExec cũng không xoá được → khoá do TrustedInstaller sở hữu sâu hơn SYSTEM.";
+                string msg = "Còn " + remain + "/" + hklmSubPaths.Count + " khoá chưa xoá.";
+                if (recreated > 0)
+                    msg += " Trong đó " + recreated + " khoá là THIẾT BỊ ĐANG HOẠT ĐỘNG/ĐANG CẮM — Windows tự tạo lại ngay, " +
+                           "KHÔNG THỂ xoá khi thiết bị còn tồn tại trên máy (webcam, WiFi, modem, hub tích hợp, hoặc USB đang cắm). " +
+                           "Muốn xoá USB cắm ngoài thì phải RÚT nó ra trước.";
+                int stubborn = remain - recreated;
+                if (stubborn > 0)
+                    msg += " " + stubborn + " khoá còn lại bị TrustedInstaller khoá sâu" + (psexec == null ? " (thiếu PsExec)." : ".");
                 return msg;
             }
             catch (Exception ex)
@@ -336,6 +368,18 @@ namespace QuanLyHeThong
         private static string WhoAmI()
         {
             try { return WindowsIdentity.GetCurrent().Name; } catch { return "(không xác định)"; }
+        }
+
+        /// <summary>Kiểm tra khoá có tồn tại không bằng reg.exe (đúng view như regedit, tránh sai lệch của .NET).</summary>
+        private static bool RegExists(string hklmSub)
+        {
+            try
+            {
+                string o;
+                int code = Run("reg.exe", "query \"HKLM\\" + hklmSub + "\"", out o);
+                return code == 0; // 0 = tồn tại, khác 0 = không tồn tại
+            }
+            catch { return true; }
         }
 
         private static bool KeyExists(string hklmSub)
