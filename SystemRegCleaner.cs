@@ -50,14 +50,25 @@ namespace QuanLyHeThong
                 if (psexec != null)
                 {
                     // Ưu tiên PsExec (đã xác nhận chạy được). reg.exe nằm System32 nên không vướng chặn script Temp.
-                    log("Dùng PsExec chạy reg import dưới SYSTEM: " + psexec);
+                    log("Tìm thấy PsExec: " + psexec);
+
+                    // 1) Xác nhận chạy đúng quyền SYSTEM
+                    string who;
+                    int wc = Run(psexec, "-accepteula -nobanner -s whoami", out who);
+                    log("  PsExec whoami (mã " + wc + "): " + OneLine(who));
+
+                    // 2) Nhập file .reg để xoá
                     string po;
-                    Run(psexec, "-accepteula -nobanner -s reg import \"" + regFile + "\"", out po);
+                    int pc = Run(psexec, "-accepteula -nobanner -s reg import \"" + regFile + "\"", out po);
+                    log("  PsExec reg import (mã " + pc + "):");
                     foreach (var line in (po ?? "").Split('\n'))
-                        if (!string.IsNullOrWhiteSpace(line)) log("  " + line.Trim());
+                        if (!string.IsNullOrWhiteSpace(line)) log("    " + line.Trim());
+                    if (string.IsNullOrWhiteSpace(po))
+                        log("    (không có output — PsExec có thể bị antivirus chặn)");
                 }
                 else
                 {
+                    log("KHÔNG tìm thấy PsExec cạnh app → dùng tác vụ SYSTEM (máy này có thể chặn).");
                     // Không có PsExec: tạo tác vụ SYSTEM gọi THẲNG reg.exe (System32), KHÔNG chạy script từ Temp.
                     usedTask = true;
                     log("Tạo tác vụ SYSTEM gọi reg import để xoá " + hklmSubPaths.Count + " khoá...");
@@ -148,11 +159,17 @@ namespace QuanLyHeThong
                 using (var p = Process.Start(psi))
                 {
                     output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
-                    p.WaitForExit(15000);
+                    p.WaitForExit(90000);
                     return p.HasExited ? p.ExitCode : -1;
                 }
             }
             catch (Exception ex) { output = ex.Message; return -1; }
+        }
+
+        private static string OneLine(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return "(trống)";
+            return s.Replace("\r", " ").Replace("\n", " ").Trim();
         }
 
         private static string SafeRead(string path)
