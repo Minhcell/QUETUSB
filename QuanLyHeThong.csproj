@@ -24,10 +24,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- PsExec (Microsoft Sysinternals) do người dùng cung cấp — chép ra cạnh exe để app tự dùng khi xoá USB -->
-    <Content Include="PsExec.exe">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
+    <!-- PsExec (Microsoft Sysinternals) NHÚNG thẳng vào exe — app tự giải nén khi cần, không cần chép kèm -->
+    <EmbeddedResource Include="PsExec.exe">
+      <LogicalName>PsExec.exe</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>

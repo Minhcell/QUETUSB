@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Security.Principal;
 using System.Text;
 using System.Threading;
@@ -35,6 +36,8 @@ namespace QuanLyHeThong
             string regFile = Path.Combine(tmp, "qlht_del_" + id + ".reg");
             string taskName = "QLHT_SysDel_" + id.Substring(0, 8);
             bool usedTask = false;
+            bool pxTemp = false;
+            string pxPath = null;
 
             try
             {
@@ -46,11 +49,12 @@ namespace QuanLyHeThong
                     reg.AppendLine("[-HKEY_LOCAL_MACHINE\\" + p + "]");
                 File.WriteAllText(regFile, reg.ToString(), Encoding.Unicode); // .reg chuẩn UTF-16
 
-                string psexec = FindPsExec();
+                string psexec = EnsurePsExec(log, out pxTemp);
+                pxPath = psexec;
                 if (psexec != null)
                 {
                     // Ưu tiên PsExec (đã xác nhận chạy được). reg.exe nằm System32 nên không vướng chặn script Temp.
-                    log("Tìm thấy PsExec: " + psexec);
+                    log("Dùng PsExec: " + psexec);
 
                     // 1) Xác nhận chạy đúng quyền SYSTEM
                     string who;
@@ -117,10 +121,21 @@ namespace QuanLyHeThong
             {
                 if (usedTask) { try { string d2; Run("schtasks.exe", "/Delete /TN \"" + taskName + "\" /F", out d2); } catch { } }
                 try { if (File.Exists(regFile)) File.Delete(regFile); } catch { }
+
+                // XOÁ PsExec tạm (nếu do app giải nén) — không để lại file nào trong máy
+                if (pxTemp && !string.IsNullOrEmpty(pxPath))
+                {
+                    for (int i = 0; i < 6; i++)
+                    {
+                        try { if (File.Exists(pxPath)) File.Delete(pxPath); if (!File.Exists(pxPath)) break; }
+                        catch { Thread.Sleep(500); } // PsExec có thể còn giữ file vài giây
+                    }
+                    try { if (File.Exists(pxPath)) log("  (PsExec tạm sẽ tự xoá lần chạy sau.)"); } catch { }
+                }
             }
         }
 
-        /// <summary>Tìm PsExec do người dùng để sẵn (cùng thư mục app hoặc System32). Không kèm sẵn vì giấy phép Microsoft.</summary>
+        /// <summary>Tìm PsExec có sẵn (cùng thư mục app hoặc System32).</summary>
         private static string FindPsExec()
         {
             try
@@ -140,6 +155,60 @@ namespace QuanLyHeThong
             }
             catch { }
             return null;
+        }
+
+        /// <summary>
+        /// Bảo đảm luôn có PsExec để chạy. Nếu máy đã có sẵn PsExec cạnh app/System32 thì dùng (extracted=false).
+        /// Nếu không, GIẢI NÉN bản PsExec nhúng trong exe ra 1 FILE TẠM ngẫu nhiên (extracted=true) — dùng xong app tự xoá,
+        /// không để lại file nào trong máy. Windows bắt buộc có file trên ổ mới chạy được tiến trình nên không thể chạy
+        /// hoàn toàn trong bộ nhớ; cách này là "ẩn" nhất có thể.
+        /// </summary>
+        private static string EnsurePsExec(Action<string> log, out bool extracted)
+        {
+            extracted = false;
+            string found = FindPsExec();
+            if (found != null) { log("Dùng PsExec có sẵn: " + found); return found; }
+
+            // Giải nén ra file tạm ngẫu nhiên
+            string tempExe = Path.Combine(Path.GetTempPath(), "qlht_px_" + Guid.NewGuid().ToString("N") + ".exe");
+            if (TryExtractPsExec(tempExe))
+            {
+                extracted = true;
+                log("PsExec (nhúng trong app) chạy tạm từ: " + tempExe + " (sẽ tự xoá sau khi xong).");
+                return tempExe;
+            }
+
+            // Dự phòng: giải nén cạnh app
+            try
+            {
+                string t2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "PsExec.exe");
+                if (TryExtractPsExec(t2)) { log("PsExec giải nén cạnh app: " + t2); return t2; }
+            }
+            catch { }
+
+            log("KHÔNG lấy được PsExec (bản nhúng lỗi?).");
+            return null;
+        }
+
+        private static bool TryExtractPsExec(string target)
+        {
+            try
+            {
+                if (File.Exists(target) && new FileInfo(target).Length > 100000) return true; // đã có sẵn, dùng luôn
+                var asm = Assembly.GetExecutingAssembly();
+                string resName = null;
+                foreach (var n in asm.GetManifestResourceNames())
+                    if (n.EndsWith("PsExec.exe", StringComparison.OrdinalIgnoreCase)) { resName = n; break; }
+                if (resName == null) return false;
+                using (var s = asm.GetManifestResourceStream(resName))
+                {
+                    if (s == null) return false;
+                    using (var fs = new FileStream(target, FileMode.Create, FileAccess.Write))
+                        s.CopyTo(fs);
+                }
+                return File.Exists(target) && new FileInfo(target).Length > 100000;
+            }
+            catch { return false; }
         }
 
         private static int Run(string file, string args, out string output)

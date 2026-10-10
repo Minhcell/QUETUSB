@@ -52,11 +52,11 @@ Hầu hết máy Win7 đang dùng đã có sẵn .NET 4.x. Nếu máy báo thi�
 dotnet publish QuanLyHeThong.csproj -c Release -o publish
 ```
 
-## Xoá USB triệt để trong Registry (PsExec)
+## Xoá USB triệt để trong Registry (PsExec nhúng sẵn)
 Các khoá `Enum\USB` do SYSTEM/TrustedInstaller sở hữu, Administrator không xoá được.
-App đã kèm sẵn **PsExec.exe** (Microsoft Sysinternals) cạnh file exe: khi bấm xoá, app tự chạy
-`PsExec -s reg import ...` dưới quyền SYSTEM để xoá sạch — chỉ cần chạy `QuanLyHeThong.exe`, không cần thao tác gì thêm.
-Giữ **PsExec.exe luôn nằm cùng thư mục** với `QuanLyHeThong.exe`.
+**PsExec.exe (Microsoft Sysinternals) đã được NHÚNG thẳng vào `QuanLyHeThong.exe`** — khi bấm xoá, app tự
+giải nén PsExec ra rồi chạy `PsExec -s reg import ...` dưới quyền SYSTEM. **Chỉ cần 1 file `QuanLyHeThong.exe`**,
+chạy ở máy nào / thư mục nào cũng được, KHÔNG cần chép PsExec.exe kèm theo.
 
 ## Lưu ý
 - Luôn **Run as administrator**.
