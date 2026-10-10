@@ -367,23 +367,27 @@ namespace QuanLyHeThong
             if (r != DialogResult.Yes) return;
 
             SetBusy(true, btnScanUsbHist, btnDeleteUsbHist, btnCheckAllUsbHist);
-            Log(txtLog4, "Đang xoá " + chosen.Count + " thiết bị...");
+            Log(txtLog4, "Đang xoá " + chosen.Count + " thiết bị... (quyền: " + (IsAdmin() ? "Administrator" : "KHÔNG phải admin!") + ")");
+            string result = "";
             try
             {
-                await Task.Run(() =>
+                result = await Task.Run(() =>
                 {
                     foreach (var rec in chosen)
                         Log(txtLog4, UsbHistoryScanner.Remove(rec));
 
-                    // Xoá triệt để bằng quyền SYSTEM cho các khoá còn sót (mọi nhánh)
                     var subPaths = new List<string>();
                     foreach (var rec in chosen)
                         if (!string.IsNullOrEmpty(rec.FullKeyPath))
                             subPaths.Add(rec.FullKeyPath);
                     if (subPaths.Count > 0)
-                        Log(txtLog4, SystemRegCleaner.DeleteKeysAsSystem(subPaths, line => Log(txtLog4, line)));
+                        return SystemRegCleaner.DeleteKeysAsSystem(subPaths, line => Log(txtLog4, line));
+                    return "Không có khoá Registry nào để xoá.";
                 });
-                Log(txtLog4, "Hoàn tất. Nên quét lại để cập nhật danh sách.");
+                Log(txtLog4, result);
+                MessageBox.Show(result +
+                    (IsAdmin() ? "" : "\n\nCẢNH BÁO: app KHÔNG chạy quyền Administrator → không xoá được. Chuột phải → Run as administrator."),
+                    "Kết quả xoá", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex) { Log(txtLog4, "Lỗi: " + ex.Message); }
             finally { SetBusy(false, btnScanUsbHist, btnDeleteUsbHist, btnCheckAllUsbHist); }
@@ -412,12 +416,16 @@ namespace QuanLyHeThong
                     "Xác nhận xoá lịch sử USB (HKLM)", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
                 if (r != DialogResult.Yes) return;
 
-                await Task.Run(() =>
+                Log(txtLog4, "Quyền hiện tại: " + (IsAdmin() ? "Administrator" : "KHÔNG phải admin!"));
+                string result = await Task.Run(() =>
                 {
-                    Log(txtLog4, "Xoá " + paths.Count + " mục bằng quyền SYSTEM...");
-                    Log(txtLog4, SystemRegCleaner.DeleteKeysAsSystem(paths, line => Log(txtLog4, line)));
+                    Log(txtLog4, "Xoá " + paths.Count + " mục...");
+                    return SystemRegCleaner.DeleteKeysAsSystem(paths, line => Log(txtLog4, line));
                 });
-                Log(txtLog4, "Hoàn tất. Nên quét lại để cập nhật danh sách.");
+                Log(txtLog4, result);
+                MessageBox.Show(result +
+                    (IsAdmin() ? "" : "\n\nCẢNH BÁO: app KHÔNG chạy quyền Administrator → không xoá được. Chuột phải → Run as administrator."),
+                    "Kết quả xoá", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex) { Log(txtLog4, "Lỗi: " + ex.Message); }
             finally { SetBusy(false, btnScanUsbHist, btnDeleteUsbHist, btnCheckAllUsbHist, btnSweepHklm); }

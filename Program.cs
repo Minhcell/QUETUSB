@@ -1,4 +1,6 @@
 using System;
+using System.Diagnostics;
+using System.Security.Principal;
 using System.Windows.Forms;
 
 namespace QuanLyHeThong
@@ -15,9 +17,42 @@ namespace QuanLyHeThong
                 return;
             }
 
+            // Bảo đảm chạy với quyền Administrator: nếu chưa, tự khởi động lại ở chế độ nâng quyền.
+            if (!IsAdmin())
+            {
+                try
+                {
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = Process.GetCurrentProcess().MainModule.FileName,
+                        UseShellExecute = true,
+                        Verb = "runas" // kích hoạt UAC nâng quyền
+                    };
+                    Process.Start(psi);
+                    return; // thoát bản chưa nâng quyền
+                }
+                catch
+                {
+                    MessageBox.Show(
+                        "Phần mềm cần quyền Administrator để xoá Registry. Hãy chuột phải vào file và chọn 'Run as administrator'.",
+                        "Cần quyền Administrator", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    // vẫn mở app để xem, nhưng xoá sẽ không được
+                }
+            }
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new MainForm());
+        }
+
+        private static bool IsAdmin()
+        {
+            try
+            {
+                using (var id = WindowsIdentity.GetCurrent())
+                    return new WindowsPrincipal(id).IsInRole(WindowsBuiltInRole.Administrator);
+            }
+            catch { return false; }
         }
     }
 }
