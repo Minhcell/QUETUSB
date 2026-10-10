@@ -41,11 +41,33 @@ namespace QuanLyHeThong
 
             try
             {
-                // File .reg xoá TẤT CẢ khoá trong 1 lần (dòng [-HKLM\...] = xoá khoá đó + con)
+                // ===== BƯỚC 1: XOÁ BẰNG QUYỀN ADMINISTRATOR (giống xoá tay trong regedit) =====
+                // Nhiều khoá Enum\USB xoá được ngay bằng Administrator, KHÔNG cần SYSTEM.
+                int adminOk = 0;
+                var remaining = new List<string>();
+                foreach (var p in hklmSubPaths)
+                {
+                    int i = p.LastIndexOf('\\');
+                    if (i > 0)
+                    {
+                        try { RegistryHelper.ForceDeleteSubKey(Registry.LocalMachine, p.Substring(0, i), p.Substring(i + 1)); }
+                        catch { }
+                    }
+                    if (!KeyExists(p)) adminOk++;
+                    else remaining.Add(p);
+                }
+                log("Xoá bằng Administrator: " + adminOk + "/" + hklmSubPaths.Count + " khoá.");
+
+                if (remaining.Count == 0)
+                    return "✔ Đã xoá sạch toàn bộ " + hklmSubPaths.Count + " khoá (bằng Administrator).";
+
+                log("Còn " + remaining.Count + " khoá cần quyền SYSTEM, đang xử lý bằng PsExec...");
+
+                // ===== BƯỚC 2: PHẦN CÒN SÓT -> dùng SYSTEM (PsExec) =====
                 var reg = new StringBuilder();
                 reg.AppendLine("Windows Registry Editor Version 5.00");
                 reg.AppendLine();
-                foreach (var p in hklmSubPaths)
+                foreach (var p in remaining)
                     reg.AppendLine("[-HKEY_LOCAL_MACHINE\\" + p + "]");
                 File.WriteAllText(regFile, reg.ToString(), Encoding.Unicode); // .reg chuẩn UTF-16
 
@@ -75,7 +97,7 @@ namespace QuanLyHeThong
                     log("KHÔNG tìm thấy PsExec cạnh app → dùng tác vụ SYSTEM (máy này có thể chặn).");
                     // Không có PsExec: tạo tác vụ SYSTEM gọi THẲNG reg.exe (System32), KHÔNG chạy script từ Temp.
                     usedTask = true;
-                    log("Tạo tác vụ SYSTEM gọi reg import để xoá " + hklmSubPaths.Count + " khoá...");
+                    log("Tạo tác vụ SYSTEM gọi reg import để xoá " + remaining.Count + " khoá...");
                     string createArgs = "/Create /TN \"" + taskName + "\" /TR \"reg import \\\"" + regFile +
                                         "\\\"\" /SC ONCE /ST 23:59 /RU SYSTEM /RL HIGHEST /F";
                     string cOut;
@@ -87,7 +109,7 @@ namespace QuanLyHeThong
                     Run("schtasks.exe", "/Run /TN \"" + taskName + "\"", out dummy);
 
                     // Chờ: hễ khoá đầu tiên biến mất là coi như đang chạy (tối đa ~30 giây)
-                    string firstKey = hklmSubPaths[0];
+                    string firstKey = remaining[0];
                     for (int i = 0; i < 60; i++)
                     {
                         Thread.Sleep(500);
